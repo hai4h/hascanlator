@@ -11,6 +11,7 @@ class SettingsDialog(QDialog):
         
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
+        
         models_tab = QWidget()
         models_layout = QVBoxLayout(models_tab)
         
@@ -33,6 +34,7 @@ class SettingsDialog(QDialog):
         models_layout.addStretch()
         tabs.addTab(models_tab, "Models")
         layout.addWidget(tabs)
+        
         self.update_ui_state() 
 
     def update_ui_state(self):

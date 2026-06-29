@@ -1,55 +1,6 @@
-from PySide6.QtWidgets import QGraphicsView, QGraphicsRectItem
-from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QPen, QColor, QPainter
-
-class MangaCanvasView(QGraphicsView):
-    def __init__(self, scene, parent=None):
-        super().__init__(scene, parent)
-        self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
-        self.setDragMode(QGraphicsView.NoDrag)
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
-        self._is_panning = False
-
-    def wheelEvent(self, event):
-        if event.modifiers() == Qt.ControlModifier:
-            if event.angleDelta().y() > 0: self.scale(1.15, 1.15)
-            else: self.scale(1/1.15, 1/1.15)
-        else: super().wheelEvent(event)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MiddleButton:
-            self._is_panning = True
-            self._pan_start_x = event.position().x()
-            self._pan_start_y = event.position().y()
-            self.setCursor(Qt.ClosedHandCursor)
-            event.accept()
-        else: super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self._is_panning:
-            dx = event.position().x() - self._pan_start_x
-            dy = event.position().y() - self._pan_start_y
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - dx)
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - dy)
-            self._pan_start_x = event.position().x()
-            self._pan_start_y = event.position().y()
-            event.accept()
-        else: super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MiddleButton:
-            self._is_panning = False
-            self.setCursor(Qt.ArrowCursor)
-            event.accept()
-        else: super().mouseReleaseEvent(event)
-
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
-            for item in self.scene().selectedItems():
-                if isinstance(item, BoundingBoxItem):
-                    self.scene().removeItem(item)
-        else: super().keyPressEvent(event)
+from PySide6.QtWidgets import QGraphicsRectItem
+from PySide6.QtGui import QPen, QColor
+from PySide6.QtCore import Qt
 
 class BoundingBoxItem(QGraphicsRectItem):
     NONE, LEFT, TOP, RIGHT, BOTTOM, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT = range(9)
@@ -103,6 +54,7 @@ class BoundingBoxItem(QGraphicsRectItem):
         if not self.isSelected():
             self.setCursor(Qt.ArrowCursor)
             return super().hoverMoveEvent(event)
+            
         self.current_handle = self.get_handle_at(event.pos())
         if self.current_handle in (self.TOP_LEFT, self.BOTTOM_RIGHT): self.setCursor(Qt.SizeFDiagCursor)
         elif self.current_handle in (self.TOP_RIGHT, self.BOTTOM_LEFT): self.setCursor(Qt.SizeBDiagCursor)
@@ -120,23 +72,24 @@ class BoundingBoxItem(QGraphicsRectItem):
         if self.current_handle != self.NONE and self.isSelected():
             self.resizing_handle = self.current_handle
             event.accept()
-        else: super().mousePressEvent(event)
+        else: 
+            super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self.resizing_handle != self.NONE:
-            rect = self.rect()
-            pos = event.pos()
-            min_size = 15 
+            rect, pos, min_size = self.rect(), event.pos(), 15 
             if self.resizing_handle in (self.LEFT, self.TOP_LEFT, self.BOTTOM_LEFT): rect.setLeft(min(pos.x(), rect.right() - min_size))
             if self.resizing_handle in (self.RIGHT, self.TOP_RIGHT, self.BOTTOM_RIGHT): rect.setRight(max(pos.x(), rect.left() + min_size))
             if self.resizing_handle in (self.TOP, self.TOP_LEFT, self.TOP_RIGHT): rect.setTop(min(pos.y(), rect.bottom() - min_size))
             if self.resizing_handle in (self.BOTTOM, self.BOTTOM_LEFT, self.BOTTOM_RIGHT): rect.setBottom(max(pos.y(), rect.top() + min_size))
             self.setRect(rect)
             event.accept()
-        else: super().mouseMoveEvent(event)
+        else: 
+            super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if self.resizing_handle != self.NONE:
             self.resizing_handle = self.NONE
             event.accept()
-        else: super().mouseReleaseEvent(event)
+        else: 
+            super().mouseReleaseEvent(event)

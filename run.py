@@ -5,7 +5,7 @@ import os
 os.environ["YOLO_VERBOSE"] = "False"
 
 from PySide6.QtWidgets import QApplication
-from src.ui.main_window import HAScanlatorWindow
+from src.ui.main.window import HAScanlatorWindow
 
 def main():
     app = QApplication(sys.argv)
