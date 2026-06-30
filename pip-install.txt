@@ -2,3 +2,4 @@ pip install PySide6
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install manga-ocr pillow
 pip install ultralytics huggingface_hub
+pip install sentencepiece sacremoses

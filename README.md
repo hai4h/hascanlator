@@ -8,7 +8,7 @@ Half-A$$ Scanlator is a local desktop application designed to streamline the man
 * Vertical Japanese text recognition (MangaOCR)
 * Non-destructive, interactive bounding box workspace
 * Multi-page project state persistence
-* Soon to implement: PDF exporter, light-weight local translator, automated start-to-end translation, SLM refining option
+* Soon to implement: PDF exporter, automated start-to-end translation, SLM refining option
 
 ## Installation
 1. Clone the repository.
