@@ -6,6 +6,7 @@ Half-A$$ Scanlator is a local desktop application designed to streamline the man
 * Modular machine learning architecture (CPU/GPU supported)
 * Automated speech bubble detection (YOLOv8)
 * Vertical Japanese text recognition (MangaOCR)
+* Japanese to English translation for OCR text (other languages support comes later)
 * Non-destructive, interactive bounding box workspace
 * Multi-page project state persistence
 * Soon to implement: PDF exporter, automated start-to-end translation, SLM refining option

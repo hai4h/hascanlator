@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 
-    QPushButton, QTabWidget, QCheckBox, QMessageBox
+    QPushButton, QTabWidget, QCheckBox, QMessageBox, QComboBox
 )
 from PySide6.QtCore import Qt
 from huggingface_hub import scan_cache_dir
@@ -16,12 +16,12 @@ class SettingsDialog(QDialog):
         
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
+        
+        # --- VISION MODELS TAB ---
         models_tab = QWidget()
-        self.models_layout = QVBoxLayout(models_tab)
+        models_layout = QVBoxLayout(models_tab)
         
-        # --- GLOBAL LOAD / UNLOAD BUTTONS ---
         global_btns_layout = QHBoxLayout()
-        
         btn_load_all = QPushButton("Load All Available")
         btn_load_all.setStyleSheet("font-weight: bold; padding: 8px;")
         btn_load_all.clicked.connect(self.load_all_models)
@@ -33,16 +33,33 @@ class SettingsDialog(QDialog):
         global_btns_layout.addWidget(btn_load_all)
         global_btns_layout.addWidget(btn_unload_all)
         
-        self.models_layout.addLayout(global_btns_layout)
-        self.models_layout.addWidget(QLabel("<hr>"))
+        models_layout.addLayout(global_btns_layout)
+        models_layout.addWidget(QLabel("<hr>"))
+        
+        # --- TRANSLATION TAB ---
+        trans_tab = QWidget()
+        trans_layout = QVBoxLayout(trans_tab)
+        
+        # Engine Selection Combo Box
+        engine_layout = QHBoxLayout()
+        engine_layout.addWidget(QLabel("<b>Translation Engine:</b>"))
+        self.engine_combo = QComboBox()
+        self.engine_combo.addItems(["Google Translate (Online)", "Local NMT (Helsinki-NLP)"])
+        
+        current_engine = self.main_window.settings.value("translation_engine", "google")
+        self.engine_combo.setCurrentIndex(0 if current_engine == "google" else 1)
+        self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
+        
+        engine_layout.addWidget(self.engine_combo)
+        trans_layout.addLayout(engine_layout)
+        trans_layout.addWidget(QLabel("<hr>"))
         
         self.model_widgets = {}
         
         # --- HELPER TO BUILD INDIVIDUAL MODEL UI ---
-        def add_model_ui(title, desc, load_key, repo_id, setting_key):
+        def add_model_ui(parent_layout, title, desc, load_key, repo_id, setting_key):
             model_layout = QVBoxLayout()
             
-            # Header with Title and Disk Indicator
             header_layout = QHBoxLayout()
             header_layout.addWidget(QLabel(f"<b>{title}</b><br>{desc}"))
             
@@ -53,7 +70,6 @@ class SettingsDialog(QDialog):
             status_lbl = QLabel()
             model_layout.addWidget(status_lbl)
             
-            # Action Buttons
             btn_layout = QHBoxLayout()
             btn_load = QPushButton("Load Model")
             btn_load.clicked.connect(lambda: self.main_window.load_model(load_key))
@@ -70,7 +86,6 @@ class SettingsDialog(QDialog):
             btn_layout.addWidget(btn_delete)
             model_layout.addLayout(btn_layout)
             
-            # Auto-Load Checkbox
             chk_auto = QCheckBox("Auto-load on next launch")
             chk_auto.setChecked(self.main_window.settings.value(setting_key, False, type=bool))
             chk_auto.stateChanged.connect(lambda state, key=setting_key, chk=chk_auto: 
@@ -78,9 +93,8 @@ class SettingsDialog(QDialog):
             model_layout.addWidget(chk_auto)
             
             model_layout.addWidget(QLabel("<hr>"))
-            self.models_layout.addLayout(model_layout)
+            parent_layout.addLayout(model_layout)
             
-            # Store references to widgets to update them dynamically later
             self.model_widgets[load_key] = {
                 "status_lbl": status_lbl,
                 "disk_lbl": disk_lbl,
@@ -92,22 +106,31 @@ class SettingsDialog(QDialog):
                 "repo_id": repo_id
             }
 
-        # --- BUILD THE LIST WITH EXPLICIT KEYS ---
-        add_model_ui("MangaOCR (Text Recognition)", "Reads Japanese text inside the boxes.", "manga_ocr", "kha-white/manga-ocr-base", "auto_load_mocr")
-        add_model_ui("YOLOv8 Bubble Detector", "Accurate speech bubble locator.", "yolo_detector", "ogkalu/manga-text-detector-yolov8s", "auto_load_yolo")
-        add_model_ui("NMT Translator (JA to EN)", "Translates recognized Japanese text into English.", "nmt_translator", "Helsinki-NLP/opus-mt-ja-en", "auto_load_nmt")
+        # --- BUILD THE LISTS ---
+        add_model_ui(models_layout, "MangaOCR (Text Recognition)", "Reads Japanese text inside the boxes.", "manga_ocr", "kha-white/manga-ocr-base", "auto_load_mocr")
+        add_model_ui(models_layout, "YOLOv8 Bubble Detector", "Accurate speech bubble locator.", "yolo_detector", "ogkalu/manga-text-detector-yolov8s", "auto_load_yolo")
         
-        self.models_layout.addStretch()
-        tabs.addTab(models_tab, "Models")
+        # Add NMT explicitly to the Translation tab instead of Vision Models tab
+        add_model_ui(trans_layout, "NMT Translator (JA to EN)", "Translates recognized Japanese text into English locally.", "nmt_translator", "Helsinki-NLP/opus-mt-ja-en", "auto_load_nmt")
+        
+        models_layout.addStretch()
+        trans_layout.addStretch()
+        
+        tabs.addTab(models_tab, "Vision Models")
+        tabs.addTab(trans_tab, "Translation")
         layout.addWidget(tabs)
         
         self.update_ui_state() 
 
+    def _on_engine_changed(self, index):
+        engine = "google" if index == 0 else "nmt"
+        self.main_window.settings.setValue("translation_engine", engine)
+        self.main_window.update_button_states()
+
     def load_all_models(self):
-        """Iterates through all downloaded models and queues them for loading."""
         for key, w_dict in self.model_widgets.items():
             if not self.is_model_downloaded(w_dict["repo_id"]):
-                continue # Skip models that haven't been downloaded yet
+                continue 
                 
             if key not in self.main_window.model_load_queue:
                 is_loaded = False
@@ -119,7 +142,6 @@ class SettingsDialog(QDialog):
                     self.main_window.load_model(key)
 
     def unload_all_models(self):
-        """Iterates through all loaded models and unloads them from memory."""
         for key in self.model_widgets.keys():
             is_loaded = False
             if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
@@ -130,7 +152,6 @@ class SettingsDialog(QDialog):
                 self.main_window.unload_model(key)
 
     def is_model_downloaded(self, repo_id):
-        """Scans the HuggingFace cache to see if the model exists on disk."""
         try:
             hf_cache_info = scan_cache_dir()
             for repo in hf_cache_info.repos:
@@ -141,7 +162,6 @@ class SettingsDialog(QDialog):
             return False
 
     def delete_model(self, load_key, repo_id):
-        """Safely removes the model from both memory and disk."""
         reply = QMessageBox.question(
             self, 
             "Confirm Deletion", 
@@ -149,12 +169,11 @@ class SettingsDialog(QDialog):
             QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.Yes:
-            self.main_window.unload_model(load_key) # Dump from RAM first
+            self.main_window.unload_model(load_key) 
             try:
                 hf_cache_info = scan_cache_dir()
                 for repo in hf_cache_info.repos:
                     if repo.repo_id == repo_id:
-                        # Queue deletion of all revisions for this specific repo
                         strategy = hf_cache_info.delete_revisions(*[rev.commit_hash for rev in repo.revisions])
                         strategy.execute()
                         break
@@ -165,13 +184,10 @@ class SettingsDialog(QDialog):
             self.update_ui_state()
 
     def _apply_state(self, is_loaded, is_loading, is_queued, w_dict):
-        """Applies button disabling and colors based on the state."""
-        # 1. Disk Check (Also manages the Checkbox!)
         is_downloaded = self.is_model_downloaded(w_dict["repo_id"])
         
         w_dict["chk_auto"].setEnabled(is_downloaded)
         if not is_downloaded:
-            # Force uncheck the auto-load option and reset settings config to False
             w_dict["chk_auto"].blockSignals(True)
             w_dict["chk_auto"].setChecked(False)
             w_dict["chk_auto"].blockSignals(False)
@@ -185,7 +201,6 @@ class SettingsDialog(QDialog):
             w_dict["btn_delete"].setEnabled(not is_loading and not is_queued)
             w_dict["btn_load"].setText("Load Model")
             
-        # 2. RAM & Action Check
         if is_loaded:
             w_dict["status_lbl"].setText("Status: <font color='green'>Loaded in Memory / Ready</font>")
             w_dict["btn_load"].setEnabled(False)
@@ -206,7 +221,6 @@ class SettingsDialog(QDialog):
             w_dict["btn_unload"].setEnabled(False)
 
     def update_ui_state(self):
-        """Maps specific main_window variables to the UI builder."""
         q = self.main_window.model_load_queue
         
         mocr_loaded = self.main_window.mocr_model is not None

@@ -448,7 +448,10 @@ class HAScanlatorWindow(QMainWindow):
 
     # --- TRANSLATION LOGIC ---
     def run_translation_on_selected(self):
-        if not self.workspace.current_image_path or not self.current_selected_box or not self.nmt_model: 
+        engine = self.settings.value("translation_engine", "google")
+        if not self.workspace.current_image_path or not self.current_selected_box: 
+            return
+        if engine == "nmt" and not self.nmt_model:
             return
         
         self.set_processing_lock(True)
@@ -461,10 +464,13 @@ class HAScanlatorWindow(QMainWindow):
         self.statusBar().showMessage("Translating selected box...")
         
         boxes_data = [(self.current_selected_box.raw_text, self.current_selected_box)]
-        self._start_translation_worker(boxes_data)
+        self._start_translation_worker(engine, boxes_data)
 
     def run_translation_on_all(self):
-        if not self.workspace.current_image_path or not self.nmt_model: 
+        engine = self.settings.value("translation_engine", "google")
+        if not self.workspace.current_image_path: 
+            return
+        if engine == "nmt" and not self.nmt_model:
             return
             
         boxes_data = []
@@ -483,13 +489,14 @@ class HAScanlatorWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.statusBar().showMessage("Translating page...")
         
-        self._start_translation_worker(boxes_data)
+        self._start_translation_worker(engine, boxes_data)
 
-    def _start_translation_worker(self, boxes_data):
-        self.translation_worker = BatchTranslationWorker(self.nmt_model, boxes_data)
+    def _start_translation_worker(self, engine, boxes_data):
+        self.translation_worker = BatchTranslationWorker(engine, self.nmt_model, boxes_data)
         self.translation_worker.progress.connect(self.on_translation_progress)
         self.translation_worker.progress_percent.connect(self.progress_bar.setValue)
         self.translation_worker.finished.connect(self.on_batch_translation_finished)
+        self.translation_worker.error.connect(self.on_translation_error)
         self.translation_worker.start()
 
     def on_translation_progress(self, translated_text, box_item_ref):
@@ -505,3 +512,10 @@ class HAScanlatorWindow(QMainWindow):
         self.set_processing_lock(False)
         self.update_window_title()
         self.save_current_page_state()
+        
+    def on_translation_error(self, err_msg):
+        QMessageBox.critical(self, "Translation Error", str(err_msg))
+        self.progress_bar.setVisible(False)
+        self.statusBar().showMessage("Error during translation.")
+        self.set_processing_lock(False)
+        self.update_window_title()
