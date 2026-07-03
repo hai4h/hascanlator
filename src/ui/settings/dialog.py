@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 
-    QPushButton, QTabWidget, QCheckBox, QMessageBox, QComboBox
+    QPushButton, QTabWidget, QCheckBox, QMessageBox, QComboBox, QStackedWidget
 )
 from PySide6.QtCore import Qt
 from huggingface_hub import scan_cache_dir
@@ -17,9 +17,11 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
         
-        # --- VISION MODELS TAB ---
+        # ==========================================
+        # TAB 1: VISION MODELS
+        # ==========================================
         models_tab = QWidget()
-        models_layout = QVBoxLayout(models_tab)
+        self.models_layout = QVBoxLayout(models_tab)
         
         global_btns_layout = QHBoxLayout()
         btn_load_all = QPushButton("Load All Available")
@@ -33,36 +35,16 @@ class SettingsDialog(QDialog):
         global_btns_layout.addWidget(btn_load_all)
         global_btns_layout.addWidget(btn_unload_all)
         
-        models_layout.addLayout(global_btns_layout)
-        models_layout.addWidget(QLabel("<hr>"))
-        
-        # --- TRANSLATION TAB ---
-        trans_tab = QWidget()
-        trans_layout = QVBoxLayout(trans_tab)
-        
-        # Engine Selection Combo Box
-        engine_layout = QHBoxLayout()
-        engine_layout.addWidget(QLabel("<b>Translation Engine:</b>"))
-        self.engine_combo = QComboBox()
-        self.engine_combo.addItems(["Google Translate (Online)", "Local NMT (Helsinki-NLP)"])
-        
-        current_engine = self.main_window.settings.value("translation_engine", "google")
-        self.engine_combo.setCurrentIndex(0 if current_engine == "google" else 1)
-        self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
-        
-        engine_layout.addWidget(self.engine_combo)
-        trans_layout.addLayout(engine_layout)
-        trans_layout.addWidget(QLabel("<hr>"))
+        self.models_layout.addLayout(global_btns_layout)
+        self.models_layout.addWidget(QLabel("<hr>"))
         
         self.model_widgets = {}
         
-        # --- HELPER TO BUILD INDIVIDUAL MODEL UI ---
         def add_model_ui(parent_layout, title, desc, load_key, repo_id, setting_key):
             model_layout = QVBoxLayout()
             
             header_layout = QHBoxLayout()
             header_layout.addWidget(QLabel(f"<b>{title}</b><br>{desc}"))
-            
             disk_lbl = QLabel()
             header_layout.addWidget(disk_lbl, alignment=Qt.AlignRight | Qt.AlignTop)
             model_layout.addLayout(header_layout)
@@ -96,26 +78,116 @@ class SettingsDialog(QDialog):
             parent_layout.addLayout(model_layout)
             
             self.model_widgets[load_key] = {
-                "status_lbl": status_lbl,
-                "disk_lbl": disk_lbl,
-                "btn_load": btn_load,
-                "btn_unload": btn_unload,
-                "btn_delete": btn_delete,
-                "chk_auto": chk_auto,
-                "setting_key": setting_key,
-                "repo_id": repo_id
+                "status_lbl": status_lbl, "disk_lbl": disk_lbl,
+                "btn_load": btn_load, "btn_unload": btn_unload, "btn_delete": btn_delete,
+                "chk_auto": chk_auto, "setting_key": setting_key, "repo_id": repo_id
             }
 
-        # --- BUILD THE LISTS ---
-        add_model_ui(models_layout, "MangaOCR (Text Recognition)", "Reads Japanese text inside the boxes.", "manga_ocr", "kha-white/manga-ocr-base", "auto_load_mocr")
-        add_model_ui(models_layout, "YOLOv8 Bubble Detector", "Accurate speech bubble locator.", "yolo_detector", "ogkalu/manga-text-detector-yolov8s", "auto_load_yolo")
+        add_model_ui(self.models_layout, "MangaOCR (Text Recognition)", "Reads Japanese text inside the boxes.", "manga_ocr", "kha-white/manga-ocr-base", "auto_load_mocr")
+        add_model_ui(self.models_layout, "YOLOv8 Bubble Detector", "Accurate speech bubble locator.", "yolo_detector", "ogkalu/manga-text-detector-yolov8s", "auto_load_yolo")
+        self.models_layout.addStretch()
         
-        # Add NMT explicitly to the Translation tab instead of Vision Models tab
-        add_model_ui(trans_layout, "NMT Translator (JA to EN)", "Translates recognized Japanese text into English locally.", "nmt_translator", "Helsinki-NLP/opus-mt-ja-en", "auto_load_nmt")
+        # ==========================================
+        # TAB 2: TRANSLATION SETTINGS
+        # ==========================================
+        trans_tab = QWidget()
+        trans_layout = QVBoxLayout(trans_tab)
         
-        models_layout.addStretch()
-        trans_layout.addStretch()
+        # --- Engine Selector ---
+        engine_layout = QHBoxLayout()
+        engine_layout.addWidget(QLabel("<b>Translation Method:</b>"))
+        self.engine_combo = QComboBox()
+        self.engine_combo.addItems(["Online API", "Local Offline NMT"])
         
+        current_engine = self.main_window.settings.value("translation_engine", "google")
+        self.engine_combo.setCurrentIndex(0 if current_engine == "google" else 1)
+        self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
+        
+        engine_layout.addWidget(self.engine_combo)
+        trans_layout.addLayout(engine_layout)
+        trans_layout.addWidget(QLabel("<hr>"))
+        
+        # --- Stacked Widget for Options ---
+        self.trans_stack = QStackedWidget()
+        
+        # 1. Online Page (Google)
+        online_page = QWidget()
+        online_layout = QVBoxLayout(online_page)
+        
+        api_layout = QHBoxLayout()
+        api_layout.addWidget(QLabel("API Provider:"))
+        api_combo = QComboBox()
+        api_combo.addItems(["Google Translate"])
+        api_combo.setEnabled(False) # Only Google available right now
+        api_layout.addWidget(api_combo)
+        online_layout.addLayout(api_layout)
+        
+        lang_layout = QHBoxLayout()
+        lang_layout.addWidget(QLabel("Input Language:"))
+        self.src_combo = QComboBox()
+        lang_layout.addWidget(QLabel("Target Language:"))
+        self.tgt_combo = QComboBox()
+        
+        # Language Dictionaries (Mapped to deep-translator codes)
+        self.langs_src = {"Auto Detect": "auto", "Japanese": "ja", "English": "en", "Korean": "ko", "Chinese (Simplified)": "zh-CN", "Vietnamese": "vi", "Spanish": "es", "French": "fr"}
+        self.langs_tgt = {"English": "en", "Vietnamese": "vi", "Spanish": "es", "French": "fr", "Japanese": "ja", "Korean": "ko", "Chinese (Simplified)": "zh-CN"}
+        
+        self.src_combo.addItems(list(self.langs_src.keys()))
+        self.tgt_combo.addItems(list(self.langs_tgt.keys()))
+        
+        saved_src = self.main_window.settings.value("trans_src", "ja")
+        saved_tgt = self.main_window.settings.value("trans_tgt", "en")
+        
+        src_idx = list(self.langs_src.values()).index(saved_src) if saved_src in self.langs_src.values() else 1
+        tgt_idx = list(self.langs_tgt.values()).index(saved_tgt) if saved_tgt in self.langs_tgt.values() else 0
+        
+        self.src_combo.setCurrentIndex(src_idx)
+        self.tgt_combo.setCurrentIndex(tgt_idx)
+        
+        self.src_combo.currentIndexChanged.connect(self._save_langs)
+        self.tgt_combo.currentIndexChanged.connect(self._save_langs)
+        
+        lang_layout.addWidget(self.src_combo)
+        lang_layout.addWidget(self.tgt_combo)
+        online_layout.addLayout(lang_layout)
+        online_layout.addStretch()
+        self.trans_stack.addWidget(online_page)
+        
+        # 2. Local NMT Page
+        nmt_page = QWidget()
+        nmt_layout = QVBoxLayout(nmt_page)
+        
+        nmt_info_layout = QHBoxLayout()
+        nmt_info_layout.addWidget(QLabel("Model Provider:"))
+        nmt_mod_combo = QComboBox()
+        nmt_mod_combo.addItems(["Helsinki-NLP/opus-mt-ja-en"])
+        nmt_mod_combo.setEnabled(False)
+        nmt_info_layout.addWidget(nmt_mod_combo)
+        nmt_layout.addLayout(nmt_info_layout)
+        
+        nmt_lang_layout = QHBoxLayout()
+        nmt_lang_layout.addWidget(QLabel("Input Language:"))
+        nmt_src = QComboBox()
+        nmt_src.addItems(["Japanese"])
+        nmt_src.setEnabled(False) # Model specific constraint
+        nmt_lang_layout.addWidget(nmt_src)
+        
+        nmt_lang_layout.addWidget(QLabel("Target Language:"))
+        nmt_tgt = QComboBox()
+        nmt_tgt.addItems(["English"])
+        nmt_tgt.setEnabled(False) # Model specific constraint
+        nmt_lang_layout.addWidget(nmt_tgt)
+        nmt_layout.addLayout(nmt_lang_layout)
+        
+        nmt_layout.addWidget(QLabel("<hr>"))
+        add_model_ui(nmt_layout, "NMT Engine", "Processes translation locally on your device.", "nmt_translator", "Helsinki-NLP/opus-mt-ja-en", "auto_load_nmt")
+        nmt_layout.addStretch()
+        self.trans_stack.addWidget(nmt_page)
+        
+        trans_layout.addWidget(self.trans_stack)
+        self.trans_stack.setCurrentIndex(0 if current_engine == "google" else 1)
+        
+        # --- COMPILE TABS ---
         tabs.addTab(models_tab, "Vision Models")
         tabs.addTab(trans_tab, "Translation")
         layout.addWidget(tabs)
@@ -125,21 +197,24 @@ class SettingsDialog(QDialog):
     def _on_engine_changed(self, index):
         engine = "google" if index == 0 else "nmt"
         self.main_window.settings.setValue("translation_engine", engine)
+        self.trans_stack.setCurrentIndex(index)
         self.main_window.update_button_states()
+
+    def _save_langs(self):
+        src_code = list(self.langs_src.values())[self.src_combo.currentIndex()]
+        tgt_code = list(self.langs_tgt.values())[self.tgt_combo.currentIndex()]
+        self.main_window.settings.setValue("trans_src", src_code)
+        self.main_window.settings.setValue("trans_tgt", tgt_code)
 
     def load_all_models(self):
         for key, w_dict in self.model_widgets.items():
-            if not self.is_model_downloaded(w_dict["repo_id"]):
-                continue 
-                
+            if not self.is_model_downloaded(w_dict["repo_id"]): continue 
             if key not in self.main_window.model_load_queue:
                 is_loaded = False
                 if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
                 if key == "yolo_detector" and self.main_window.yolo_model: is_loaded = True
                 if key == "nmt_translator" and self.main_window.nmt_model: is_loaded = True
-                
-                if not is_loaded:
-                    self.main_window.load_model(key)
+                if not is_loaded: self.main_window.load_model(key)
 
     def unload_all_models(self):
         for key in self.model_widgets.keys():
@@ -147,27 +222,18 @@ class SettingsDialog(QDialog):
             if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
             if key == "yolo_detector" and self.main_window.yolo_model: is_loaded = True
             if key == "nmt_translator" and self.main_window.nmt_model: is_loaded = True
-            
-            if is_loaded:
-                self.main_window.unload_model(key)
+            if is_loaded: self.main_window.unload_model(key)
 
     def is_model_downloaded(self, repo_id):
         try:
             hf_cache_info = scan_cache_dir()
             for repo in hf_cache_info.repos:
-                if repo.repo_id == repo_id:
-                    return True
+                if repo.repo_id == repo_id: return True
             return False
-        except Exception:
-            return False
+        except Exception: return False
 
     def delete_model(self, load_key, repo_id):
-        reply = QMessageBox.question(
-            self, 
-            "Confirm Deletion", 
-            "Are you sure you want to delete this model from your disk? You will need to redownload it next time.", 
-            QMessageBox.Yes | QMessageBox.No
-        )
+        reply = QMessageBox.question(self, "Confirm Deletion", "Are you sure you want to delete this model from your disk? You will need to redownload it next time.", QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             self.main_window.unload_model(load_key) 
             try:
@@ -180,7 +246,6 @@ class SettingsDialog(QDialog):
                 QMessageBox.information(self, "Success", "Model successfully deleted from disk.")
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Could not delete model cache: {e}")
-                
             self.update_ui_state()
 
     def _apply_state(self, is_loaded, is_loading, is_queued, w_dict):
@@ -192,7 +257,6 @@ class SettingsDialog(QDialog):
             w_dict["chk_auto"].setChecked(False)
             w_dict["chk_auto"].blockSignals(False)
             self.main_window.settings.setValue(w_dict["setting_key"], False)
-            
             w_dict["disk_lbl"].setText("<font color='grey'><b>[Not Downloaded]</b></font>")
             w_dict["btn_delete"].setEnabled(False)
             w_dict["btn_load"].setText("Download && Load")

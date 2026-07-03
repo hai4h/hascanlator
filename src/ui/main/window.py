@@ -492,7 +492,11 @@ class HAScanlatorWindow(QMainWindow):
         self._start_translation_worker(engine, boxes_data)
 
     def _start_translation_worker(self, engine, boxes_data):
-        self.translation_worker = BatchTranslationWorker(engine, self.nmt_model, boxes_data)
+        # Fetch the selected languages from the UI preferences
+        src_lang = self.settings.value("trans_src", "ja")
+        tgt_lang = self.settings.value("trans_tgt", "en")
+        
+        self.translation_worker = BatchTranslationWorker(engine, self.nmt_model, boxes_data, src_lang, tgt_lang)
         self.translation_worker.progress.connect(self.on_translation_progress)
         self.translation_worker.progress_percent.connect(self.progress_bar.setValue)
         self.translation_worker.finished.connect(self.on_batch_translation_finished)
