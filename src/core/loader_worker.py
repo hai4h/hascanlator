@@ -23,25 +23,51 @@ class ModelLoaderWorker(QThread):
                 self.finished.emit(model, self.model_name)
 
             elif self.model_name == "nmt_translator":
-                from transformers import MarianMTModel, MarianTokenizer
+                from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+                from PySide6.QtCore import QSettings
                 
-                model_id = "Helsinki-NLP/opus-mt-ja-en"
-                tokenizer = MarianTokenizer.from_pretrained(model_id)
-                model = MarianMTModel.from_pretrained(model_id)
+                repo_id = QSettings("HAScanlatorTeam", "HAScanlator").value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
+                tokenizer = AutoTokenizer.from_pretrained(repo_id)
+                model = AutoModelForSeq2SeqLM.from_pretrained(repo_id)
                 
-                # Create a simple wrapper to keep compatibility with our BatchTranslationWorker
                 class NMTWrapper:
-                    def __init__(self, tok, mod):
+                    def __init__(self, tok, mod, repo):
                         self.tokenizer = tok
                         self.model = mod
+                        self.repo = repo
                         
-                    def __call__(self, text):
-                        inputs = self.tokenizer(text, return_tensors="pt", padding=True)
-                        translated_tokens = self.model.generate(**inputs)
+                    def __call__(self, text, src_lang="ja", tgt_lang="en"):
+                        # NLLB Multilingual Support Logic
+                        if "nllb" in self.repo:
+                            lang_map = {
+                                "auto": "jpn_Jpan", "ja": "jpn_Jpan", "en": "eng_Latn", 
+                                "ko": "kor_Hang", "zh-CN": "zho_Hans", "vi": "vie_Latn", 
+                                "es": "spa_Latn", "fr": "fra_Latn"
+                            }
+                            self.tokenizer.src_lang = lang_map.get(src_lang, "jpn_Jpan")
+                            inputs = self.tokenizer(text, return_tensors="pt", padding=True)
+                            
+                            target_code = lang_map.get(tgt_lang, "eng_Latn")
+                            
+                            # FIX: Safely retrieve the language token ID
+                            if hasattr(self.tokenizer, "lang_code_to_id"):
+                                forced_bos_token_id = self.tokenizer.lang_code_to_id[target_code]
+                            else:
+                                forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(target_code)
+                            
+                            translated_tokens = self.model.generate(
+                                **inputs, 
+                                forced_bos_token_id=forced_bos_token_id
+                            )
+                        else:
+                            # Standard Helsinki-NLP (Language is hardcoded in the model)
+                            inputs = self.tokenizer(text, return_tensors="pt", padding=True)
+                            translated_tokens = self.model.generate(**inputs)
+                            
                         res_text = self.tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
                         return [{"translation_text": res_text}]
                         
-                self.finished.emit(NMTWrapper(tokenizer, model), self.model_name)
+                self.finished.emit(NMTWrapper(tokenizer, model, repo_id), self.model_name)
                 
         except Exception as e:
             self.error.emit(self.model_name, str(e))

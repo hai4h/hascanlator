@@ -41,6 +41,7 @@ class SettingsDialog(QDialog):
         self.model_widgets = {}
         
         def add_model_ui(parent_layout, title, desc, load_key, repo_id, setting_key):
+            repo_getter = lambda r=repo_id: r() if callable(r) else r
             model_layout = QVBoxLayout()
             
             header_layout = QHBoxLayout()
@@ -61,7 +62,7 @@ class SettingsDialog(QDialog):
             
             btn_delete = QPushButton("Delete from Disk")
             btn_delete.setStyleSheet("color: #d9534f;")
-            btn_delete.clicked.connect(lambda: self.delete_model(load_key, repo_id))
+            btn_delete.clicked.connect(lambda k=load_key, g=repo_getter: self.delete_model(k, g()))
             
             btn_layout.addWidget(btn_load)
             btn_layout.addWidget(btn_unload)
@@ -80,7 +81,8 @@ class SettingsDialog(QDialog):
             self.model_widgets[load_key] = {
                 "status_lbl": status_lbl, "disk_lbl": disk_lbl,
                 "btn_load": btn_load, "btn_unload": btn_unload, "btn_delete": btn_delete,
-                "chk_auto": chk_auto, "setting_key": setting_key, "repo_id": repo_id
+                "chk_auto": chk_auto, "setting_key": setting_key, "repo_id": repo_id,
+                "get_repo_id": repo_getter
             }
 
         add_model_ui(self.models_layout, "MangaOCR (Text Recognition)", "Reads Japanese text inside the boxes.", "manga_ocr", "kha-white/manga-ocr-base", "auto_load_mocr")
@@ -159,40 +161,63 @@ class SettingsDialog(QDialog):
         
         nmt_info_layout = QHBoxLayout()
         nmt_info_layout.addWidget(QLabel("Model Provider:"))
-        nmt_mod_combo = QComboBox()
-        nmt_mod_combo.addItems(["Helsinki-NLP/opus-mt-ja-en"])
-        nmt_mod_combo.setEnabled(False)
-        nmt_info_layout.addWidget(nmt_mod_combo)
+        self.nmt_mod_combo = QComboBox()
+        
+        # Adding Multilingual NLLB as an option
+        nmt_repos = ["Helsinki-NLP/opus-mt-ja-en", "facebook/nllb-200-distilled-600M"]
+        self.nmt_mod_combo.addItems(nmt_repos)
+        
+        saved_nmt = self.main_window.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
+        if saved_nmt in nmt_repos:
+            self.nmt_mod_combo.setCurrentIndex(nmt_repos.index(saved_nmt))
+            
+        self.nmt_mod_combo.currentIndexChanged.connect(self._on_nmt_repo_changed)
+        nmt_info_layout.addWidget(self.nmt_mod_combo)
         nmt_layout.addLayout(nmt_info_layout)
         
         nmt_lang_layout = QHBoxLayout()
+        
         nmt_lang_layout.addWidget(QLabel("Input Language:"))
-        nmt_src = QComboBox()
-        nmt_src.addItems(["Japanese"])
-        nmt_src.setEnabled(False) # Model specific constraint
-        nmt_lang_layout.addWidget(nmt_src)
+        self.nmt_src = QComboBox()
+        self.nmt_src.addItems(list(self.langs_src.keys()))
+        self.nmt_src.setCurrentIndex(src_idx)
+        self.nmt_src.currentIndexChanged.connect(self._save_nmt_langs)
+        nmt_lang_layout.addWidget(self.nmt_src)
         
         nmt_lang_layout.addWidget(QLabel("Target Language:"))
-        nmt_tgt = QComboBox()
-        nmt_tgt.addItems(["English"])
-        nmt_tgt.setEnabled(False) # Model specific constraint
-        nmt_lang_layout.addWidget(nmt_tgt)
+        self.nmt_tgt = QComboBox()
+        self.nmt_tgt.addItems(list(self.langs_tgt.keys()))
+        self.nmt_tgt.setCurrentIndex(tgt_idx)
+        self.nmt_tgt.currentIndexChanged.connect(self._save_nmt_langs)
+        nmt_lang_layout.addWidget(self.nmt_tgt)
+        
         nmt_layout.addLayout(nmt_lang_layout)
         
         nmt_layout.addWidget(QLabel("<hr>"))
-        add_model_ui(nmt_layout, "NMT Engine", "Processes translation locally on your device.", "nmt_translator", "Helsinki-NLP/opus-mt-ja-en", "auto_load_nmt")
+        add_model_ui(nmt_layout, "NMT Engine", "Processes translation locally on your device.", "nmt_translator", 
+                     lambda: self.main_window.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en"), "auto_load_nmt")
         nmt_layout.addStretch()
         self.trans_stack.addWidget(nmt_page)
         
         trans_layout.addWidget(self.trans_stack)
         self.trans_stack.setCurrentIndex(0 if current_engine == "google" else 1)
         
+        self._update_nmt_lang_states()
+        
         # --- COMPILE TABS ---
-        tabs.addTab(models_tab, "Vision Models")
+        tabs.addTab(models_tab, "Detection")
         tabs.addTab(trans_tab, "Translation")
         layout.addWidget(tabs)
         
         self.update_ui_state() 
+
+    def closeEvent(self, event):
+        """Safely disconnect signals when the settings dialog is closed to prevent C++ object deletion crashes."""
+        try:
+            self.main_window.model_status_changed.disconnect(self.update_ui_state)
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def _on_engine_changed(self, index):
         engine = "google" if index == 0 else "nmt"
@@ -200,15 +225,63 @@ class SettingsDialog(QDialog):
         self.trans_stack.setCurrentIndex(index)
         self.main_window.update_button_states()
 
+    def _on_nmt_repo_changed(self, index):
+        new_repo = "facebook/nllb-200-distilled-600M" if index == 1 else "Helsinki-NLP/opus-mt-ja-en"
+        old_repo = self.main_window.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
+        
+        if new_repo != old_repo:
+            self.main_window.settings.setValue("nmt_model_repo", new_repo)
+            self._update_nmt_lang_states()
+            
+            # If an NMT model is currently loaded (or loading), automatically swap it out
+            if self.main_window.nmt_model is not None or self.main_window.nmt_is_loading:
+                self.main_window.unload_model("nmt_translator")
+                self.main_window.load_model("nmt_translator")
+                
+            self.update_ui_state()
+
+    def _update_nmt_lang_states(self):
+        repo = self.main_window.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
+        if "nllb" in repo:
+            self.nmt_src.setEnabled(True)
+            self.nmt_tgt.setEnabled(True)
+        else:
+            if "ja" in self.langs_src.values():
+                self.nmt_src.setCurrentIndex(list(self.langs_src.values()).index("ja"))
+            if "en" in self.langs_tgt.values():
+                self.nmt_tgt.setCurrentIndex(list(self.langs_tgt.values()).index("en"))
+            self.nmt_src.setEnabled(False)
+            self.nmt_tgt.setEnabled(False)
+
+    def _save_nmt_langs(self):
+        src_code = list(self.langs_src.values())[self.nmt_src.currentIndex()]
+        tgt_code = list(self.langs_tgt.values())[self.nmt_tgt.currentIndex()]
+        self.main_window.settings.setValue("trans_src", src_code)
+        self.main_window.settings.setValue("trans_tgt", tgt_code)
+        
+        self.src_combo.blockSignals(True)
+        self.tgt_combo.blockSignals(True)
+        self.src_combo.setCurrentIndex(self.nmt_src.currentIndex())
+        self.tgt_combo.setCurrentIndex(self.nmt_tgt.currentIndex())
+        self.src_combo.blockSignals(False)
+        self.tgt_combo.blockSignals(False)
+
     def _save_langs(self):
         src_code = list(self.langs_src.values())[self.src_combo.currentIndex()]
         tgt_code = list(self.langs_tgt.values())[self.tgt_combo.currentIndex()]
         self.main_window.settings.setValue("trans_src", src_code)
         self.main_window.settings.setValue("trans_tgt", tgt_code)
+        
+        self.nmt_src.blockSignals(True)
+        self.nmt_tgt.blockSignals(True)
+        self.nmt_src.setCurrentIndex(self.src_combo.currentIndex())
+        self.nmt_tgt.setCurrentIndex(self.tgt_combo.currentIndex())
+        self.nmt_src.blockSignals(False)
+        self.nmt_tgt.blockSignals(False)
 
     def load_all_models(self):
         for key, w_dict in self.model_widgets.items():
-            if not self.is_model_downloaded(w_dict["repo_id"]): continue 
+            if not self.is_model_downloaded(w_dict["get_repo_id"]()): continue 
             if key not in self.main_window.model_load_queue:
                 is_loaded = False
                 if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
@@ -249,7 +322,7 @@ class SettingsDialog(QDialog):
             self.update_ui_state()
 
     def _apply_state(self, is_loaded, is_loading, is_queued, w_dict):
-        is_downloaded = self.is_model_downloaded(w_dict["repo_id"])
+        is_downloaded = self.is_model_downloaded(w_dict["get_repo_id"]())
         
         w_dict["chk_auto"].setEnabled(is_downloaded)
         if not is_downloaded:
@@ -257,6 +330,7 @@ class SettingsDialog(QDialog):
             w_dict["chk_auto"].setChecked(False)
             w_dict["chk_auto"].blockSignals(False)
             self.main_window.settings.setValue(w_dict["setting_key"], False)
+            
             w_dict["disk_lbl"].setText("<font color='grey'><b>[Not Downloaded]</b></font>")
             w_dict["btn_delete"].setEnabled(False)
             w_dict["btn_load"].setText("Download && Load")
@@ -285,19 +359,22 @@ class SettingsDialog(QDialog):
             w_dict["btn_unload"].setEnabled(False)
 
     def update_ui_state(self):
-        q = self.main_window.model_load_queue
-        
-        mocr_loaded = self.main_window.mocr_model is not None
-        mocr_loading = self.main_window.mocr_is_loading
-        mocr_queued = "manga_ocr" in q
-        self._apply_state(mocr_loaded, mocr_loading, mocr_queued, self.model_widgets["manga_ocr"])
-        
-        yolo_loaded = self.main_window.yolo_model is not None
-        yolo_loading = self.main_window.yolo_is_loading
-        yolo_queued = "yolo_detector" in q
-        self._apply_state(yolo_loaded, yolo_loading, yolo_queued, self.model_widgets["yolo_detector"])
+        try:
+            q = self.main_window.model_load_queue
+            
+            mocr_loaded = self.main_window.mocr_model is not None
+            mocr_loading = self.main_window.mocr_is_loading
+            mocr_queued = "manga_ocr" in q
+            self._apply_state(mocr_loaded, mocr_loading, mocr_queued, self.model_widgets["manga_ocr"])
+            
+            yolo_loaded = self.main_window.yolo_model is not None
+            yolo_loading = self.main_window.yolo_is_loading
+            yolo_queued = "yolo_detector" in q
+            self._apply_state(yolo_loaded, yolo_loading, yolo_queued, self.model_widgets["yolo_detector"])
 
-        nmt_loaded = self.main_window.nmt_model is not None
-        nmt_loading = self.main_window.nmt_is_loading
-        nmt_queued = "nmt_translator" in q
-        self._apply_state(nmt_loaded, nmt_loading, nmt_queued, self.model_widgets["nmt_translator"])
+            nmt_loaded = self.main_window.nmt_model is not None
+            nmt_loading = self.main_window.nmt_is_loading
+            nmt_queued = "nmt_translator" in q
+            self._apply_state(nmt_loaded, nmt_loading, nmt_queued, self.model_widgets["nmt_translator"])
+        except RuntimeError:
+            pass # Ignore if the C++ UI object has already been deleted during close

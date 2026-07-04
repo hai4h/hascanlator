@@ -1,9 +1,10 @@
 import os
 import gc
+import psutil
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QMessageBox, QProgressBar
+    QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QMessageBox, QProgressBar, QLabel
 )
 from PySide6.QtCore import Qt, QRectF, Signal, QSettings, QTimer
 from PySide6.QtGui import QPixmap
@@ -94,6 +95,23 @@ class HAScanlatorWindow(QMainWindow):
         self.progress_bar.setMaximumWidth(300)
         self.progress_bar.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress_bar)
+        
+        # --- RAM Usage Indicator ---
+        self.ram_lbl = QLabel("RAM: 0.00 GB")
+        self.ram_lbl.setStyleSheet("padding-left: 10px; padding-right: 10px; color: #888;")
+        self.statusBar().addPermanentWidget(self.ram_lbl)
+        
+        # Calculate total system RAM once
+        try:
+            self.system_total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+        except Exception:
+            self.system_total_ram_gb = 0.0
+        
+        self.ram_timer = QTimer(self)
+        self.ram_timer.timeout.connect(self._update_ram_usage)
+        self.ram_timer.start(2000) 
+        self._update_ram_usage()
+        
         self.statusBar().showMessage("Ready")
 
     def _connect_signals(self):
@@ -168,6 +186,22 @@ class HAScanlatorWindow(QMainWindow):
             
         self.nav.btn_prev.setEnabled(not self.is_processing and self.workspace.current_img_index > 0)
         self.nav.btn_next.setEnabled(not self.is_processing and self.workspace.current_img_index < self.workspace.total_pages - 1)
+
+    def _update_ram_usage(self):
+        """Calculates current app memory footprint using psutil."""
+        try:
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            
+            # Convert bytes to gigabytes
+            app_gb_usage = mem_info.rss / (1024 ** 3)
+            
+            if getattr(self, 'system_total_ram_gb', 0.0) > 0:
+                self.ram_lbl.setText(f"RAM: {app_gb_usage:.2f} / {self.system_total_ram_gb:.1f} G")
+            else:
+                self.ram_lbl.setText(f"RAM: {app_gb_usage:.2f} G")
+        except Exception:
+            pass
 
     def set_processing_lock(self, locked):
         self.is_processing = locked

@@ -3,7 +3,7 @@
 Half-A$$ Scanlator is a local desktop application designed to streamline the manga scanlation process. It features automated text detection, optical character recognition (OCR), and an interactive workspace for manual refinement.
 
 ## Features
-* Modular machine learning architecture (CPU/GPU supported)
+* Modular machine learning architecture (designed to run efficiently on CPU)
 * Automated speech bubble detection (YOLOv8)
 * Vertical Japanese text recognition (MangaOCR)
 * Japanese to English translation for OCR text (other languages support comes later)
