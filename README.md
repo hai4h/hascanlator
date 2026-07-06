@@ -1,4 +1,4 @@
-# HAScanlator
+# HAScanlator (ON-GOING)
 
 Half-A$$ Scanlator is a local desktop application designed to streamline the manga scanlation process. It features automated text detection, optical character recognition (OCR), and an interactive workspace for manual refinement.
 

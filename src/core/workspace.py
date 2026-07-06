@@ -6,6 +6,11 @@ class WorkspaceManager:
         self.image_paths = []
         self.current_img_index = -1
         self.page_data_cache = {}
+        
+        # --- Image State Managers ---
+        self.original_images = {} # path -> cv2 numpy array
+        self.edited_images = {}   # path -> cv2 numpy array
+        self.undo_stacks = {}     # path -> list of cv2 numpy arrays
 
     def load_images(self, file_paths):
         self.image_paths = sorted(file_paths)
@@ -16,6 +21,9 @@ class WorkspaceManager:
         self.image_paths.clear()
         self.current_img_index = -1
         self.page_data_cache.clear()
+        self.original_images.clear()
+        self.edited_images.clear()
+        self.undo_stacks.clear()
 
     @property
     def has_images(self):
@@ -54,12 +62,10 @@ class WorkspaceManager:
         return False
 
     def save_page_state(self, path, boxes_data):
-        """Saves a dictionary of bounding box coordinates/text for a specific image path."""
         if path:
             self.page_data_cache[path] = boxes_data
 
     def get_page_state(self, path):
-        """Retrieves the cached bounding boxes for an image path."""
         return self.page_data_cache.get(path, None)
 
     def is_page_processed(self, path):

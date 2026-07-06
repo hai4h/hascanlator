@@ -1,13 +1,15 @@
 import os
 import gc
 import psutil
+import cv2
+import numpy as np
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QMessageBox, QProgressBar, QLabel
 )
 from PySide6.QtCore import Qt, QRectF, Signal, QSettings, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QImage
 
 from src.core.workspace import WorkspaceManager
 from src.core.detection_worker import DetectionWorker
@@ -35,7 +37,6 @@ class HAScanlatorWindow(QMainWindow):
         self.settings = QSettings("HAScanlatorTeam", "HAScanlator")
         self.workspace = WorkspaceManager()
         
-        # State & Threads
         self.current_image_item = None
         self.current_selected_box = None
         self._updating_ui = False 
@@ -96,12 +97,10 @@ class HAScanlatorWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress_bar)
         
-        # --- RAM Usage Indicator ---
         self.ram_lbl = QLabel("RAM: 0.00 GB")
         self.ram_lbl.setStyleSheet("padding-left: 10px; padding-right: 10px; color: #888;")
         self.statusBar().addPermanentWidget(self.ram_lbl)
         
-        # Calculate total system RAM once
         try:
             self.system_total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
         except Exception:
@@ -115,9 +114,14 @@ class HAScanlatorWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
     def _connect_signals(self):
-        # Toolbar
         self.toolbar.btn_load.clicked.connect(self.load_images_dialog)
         self.toolbar.btn_reset.clicked.connect(self.reset_workspace)
+        
+        # Image Manipulation Signals
+        self.toolbar.btn_peek.pressed.connect(self.show_original_image)
+        self.toolbar.btn_peek.released.connect(self.show_edited_image)
+        self.toolbar.btn_undo.clicked.connect(self.undo_edit)
+        
         self.toolbar.btn_auto_detect.clicked.connect(self.run_auto_detect)
         self.toolbar.btn_add_box.clicked.connect(self.add_test_box)
         self.toolbar.btn_settings.clicked.connect(lambda: SettingsDialog(self).exec())
@@ -127,11 +131,9 @@ class HAScanlatorWindow(QMainWindow):
             lambda: self.settings.setValue("auto_process", self.toolbar.chk_auto_process.isChecked())
         )
 
-        # Navigation
         self.nav.btn_prev.clicked.connect(self.prev_image)
         self.nav.btn_next.clicked.connect(self.next_image)
 
-        # Canvas & Dock
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.right_dock.btn_run_ocr.clicked.connect(self.run_ocr_on_selected)
         self.right_dock.btn_delete_box.clicked.connect(self.delete_selected_box)
@@ -139,6 +141,17 @@ class HAScanlatorWindow(QMainWindow):
         self.right_dock.trans_input.textChanged.connect(self.on_trans_text_edited)
         self.right_dock.btn_translate_box.clicked.connect(self.run_translation_on_selected)
         self.right_dock.btn_translate_all.clicked.connect(self.run_translation_on_all)
+        
+        # Typesetting Signals
+        self.right_dock.btn_clean_bubble.clicked.connect(self.smart_clean_bubble)
+        self.right_dock.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
+        
+        self.right_dock.btn_align_left.clicked.connect(lambda: self.set_text_alignment(Qt.AlignLeft))
+        self.right_dock.btn_align_center.clicked.connect(lambda: self.set_text_alignment(Qt.AlignCenter))
+        self.right_dock.btn_align_right.clicked.connect(lambda: self.set_text_alignment(Qt.AlignRight))
+        
+        self.right_dock.btn_indent_plus.clicked.connect(lambda: self.set_text_indent(5))
+        self.right_dock.btn_indent_minus.clicked.connect(lambda: self.set_text_indent(-5))
 
     def closeEvent(self, event):
         if self.scene:
@@ -159,6 +172,14 @@ class HAScanlatorWindow(QMainWindow):
 
     def update_button_states(self):
         has_image = self.workspace.has_images
+        has_box = self.current_selected_box is not None
+        
+        # Toolbar State
+        self.toolbar.btn_peek.setEnabled(has_image)
+        if has_image and len(self.workspace.undo_stacks.get(self.workspace.current_image_path, [])) > 0:
+            self.toolbar.btn_undo.setEnabled(True)
+        else:
+            self.toolbar.btn_undo.setEnabled(False)
         
         if self.yolo_model is None:
             self.toolbar.btn_auto_detect.setEnabled(False)
@@ -167,11 +188,11 @@ class HAScanlatorWindow(QMainWindow):
             self.toolbar.btn_auto_detect.setEnabled(not self.is_processing and has_image)
             self.toolbar.btn_auto_detect.setText("Auto Detect\n(Whole Page)")
             
+        # OCR / Trans State
         if self.mocr_model is None:
             self.right_dock.btn_run_ocr.setEnabled(False)
             self.right_dock.btn_run_ocr.setText("OCR Model Required")
         else:
-            has_box = self.current_selected_box is not None
             self.right_dock.btn_run_ocr.setEnabled(not self.is_processing and has_image and has_box)
             self.right_dock.btn_run_ocr.setText("Run OCR on Box")
 
@@ -184,28 +205,147 @@ class HAScanlatorWindow(QMainWindow):
             self.right_dock.btn_translate_box.setText("Translate Box")
             self.right_dock.btn_translate_all.setEnabled(not self.is_processing and has_image)
             
+        # Typesetting State
+        self.right_dock.btn_clean_bubble.setEnabled(not self.is_processing and has_image and has_box)
+        self.right_dock.btn_toggle_typeset.setEnabled(has_box)
+        self.right_dock.btn_align_left.setEnabled(has_box)
+        self.right_dock.btn_align_center.setEnabled(has_box)
+        self.right_dock.btn_align_right.setEnabled(has_box)
+        self.right_dock.btn_indent_minus.setEnabled(has_box)
+        self.right_dock.btn_indent_plus.setEnabled(has_box)
+            
+        # Navigation
         self.nav.btn_prev.setEnabled(not self.is_processing and self.workspace.current_img_index > 0)
         self.nav.btn_next.setEnabled(not self.is_processing and self.workspace.current_img_index < self.workspace.total_pages - 1)
 
     def _update_ram_usage(self):
-        """Calculates current app memory footprint using psutil."""
         try:
             process = psutil.Process(os.getpid())
-            mem_info = process.memory_info()
-            
-            # Convert bytes to gigabytes
-            app_gb_usage = mem_info.rss / (1024 ** 3)
+            app_gb_usage = process.memory_info().rss / (1024 ** 3)
             
             if getattr(self, 'system_total_ram_gb', 0.0) > 0:
-                self.ram_lbl.setText(f"RAM: {app_gb_usage:.2f} / {self.system_total_ram_gb:.1f} G")
+                self.ram_lbl.setText(f"RAM: {app_gb_usage:.2f} GB / {self.system_total_ram_gb:.1f} GB")
             else:
-                self.ram_lbl.setText(f"RAM: {app_gb_usage:.2f} G")
+                self.ram_lbl.setText(f"RAM: {app_gb_usage:.2f} GB")
         except Exception:
             pass
 
     def set_processing_lock(self, locked):
         self.is_processing = locked
         self.update_button_states()
+
+    # --- OPENCV IMAGE HELPERS ---
+    def imread_utf8(self, filepath):
+        """Allows cv2 to load files that contain non-ascii characters in their folder path."""
+        img_array = np.fromfile(filepath, np.uint8)
+        return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+    def cv2_to_qpixmap(self, cv_img):
+        """Converts an OpenCV BGR numpy array to QPixmap for rendering."""
+        h, w, ch = cv_img.shape
+        bytes_per_line = ch * w
+        converted = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+        qimg = QImage(converted.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        return QPixmap.fromImage(qimg)
+
+    # --- PEEK AND UNDO LOGIC ---
+    def show_original_image(self):
+        path = self.workspace.current_image_path
+        if path and path in self.workspace.original_images:
+            self.current_image_item.setPixmap(self.cv2_to_qpixmap(self.workspace.original_images[path]))
+
+    def show_edited_image(self):
+        path = self.workspace.current_image_path
+        if path and path in self.workspace.edited_images:
+            self.current_image_item.setPixmap(self.cv2_to_qpixmap(self.workspace.edited_images[path]))
+
+    def undo_edit(self):
+        path = self.workspace.current_image_path
+        if path and self.workspace.undo_stacks.get(path):
+            last_img = self.workspace.undo_stacks[path].pop()
+            self.workspace.edited_images[path] = last_img
+            self.show_edited_image()
+            self.update_button_states()
+
+    def smart_clean_bubble(self):
+        if not self.workspace.current_image_path or not self.current_selected_box: return
+        path = self.workspace.current_image_path
+        
+        # 1. Save Undo State
+        current_img = self.workspace.edited_images[path].copy()
+        self.workspace.undo_stacks[path].append(current_img)
+        if len(self.workspace.undo_stacks[path]) > 5:
+            self.workspace.undo_stacks[path].pop(0)
+            
+        rect = self.current_selected_box.sceneBoundingRect()
+        x, y, w, h = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
+        
+        img = self.workspace.edited_images[path]
+        
+        # 2. Boundary Safety Check
+        x, y = max(0, x), max(0, y)
+        w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
+        if w <= 0 or h <= 0: return
+        
+        roi = img[y:y+h, x:x+w]
+        
+        # 3. Smart Masking
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        
+        # Use Otsu's thresholding to find the core black text
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        clean_mask = np.zeros_like(gray)
+        
+        for contour in contours:
+            cx, cy, cw, ch = cv2.boundingRect(contour)
+            
+            # Filter 1: Edge touching (increased margin slightly to 3 for safety)
+            margin = 3
+            touches_edge = (cx <= margin) or (cy <= margin) or (cx + cw >= w - margin) or (cy + ch >= h - margin)
+            
+            # Filter 2: Too huge
+            area = cv2.contourArea(contour)
+            too_huge = area > (w * h * 0.5)
+            
+            if not touches_edge and not too_huge:
+                cv2.drawContours(clean_mask, [contour], -1, 255, thickness=cv2.FILLED)
+        
+        # 4. Aggressive Mask Expansion
+        # Use an Ellipse kernel to evenly expand the mask in all directions
+        # Iterations=2 makes the mask fat enough to completely swallow grey JPEG artifacts
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        clean_mask = cv2.dilate(clean_mask, kernel, iterations=2)
+        
+        # 5. Erase text
+        # Radius 7 forces the algorithm to look further away (past the halo) for clean replacement colors
+        cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_TELEA)
+        
+        img[y:y+h, x:x+w] = cleaned_roi
+        
+        # 6. Save and Render
+        self.workspace.edited_images[path] = img
+        self.show_edited_image()
+        self.update_button_states()
+
+    # --- TYPESETTING CONTROLS ---
+    def toggle_typeset_view(self):
+        if not self.current_selected_box: return
+        self.current_selected_box.toggle_typeset()
+        
+    def set_text_alignment(self, align):
+        if not self.current_selected_box: return
+        self.current_selected_box.align = align
+        if self.current_selected_box.is_typeset:
+            self.current_selected_box.update_typeset()
+
+    def set_text_indent(self, delta):
+        if not self.current_selected_box: return
+        self.current_selected_box.indent = max(0, self.current_selected_box.indent + delta)
+        if self.current_selected_box.is_typeset:
+            self.current_selected_box.update_typeset()
 
     # --- MODEL LOADING LOGIC ---
     def load_model(self, model_name):
@@ -215,8 +355,7 @@ class HAScanlatorWindow(QMainWindow):
         self._process_model_queue()
 
     def _process_model_queue(self):
-        if self.is_loading_model_seq or not self.model_load_queue:
-            return
+        if self.is_loading_model_seq or not self.model_load_queue: return
             
         model_name = self.model_load_queue.pop(0)
         self.is_loading_model_seq = True
@@ -243,14 +382,13 @@ class HAScanlatorWindow(QMainWindow):
         elif name == "nmt_translator":
             self.nmt_model, self.nmt_is_loading = model, False
 
-        if thread_ref in self.loader_threads: 
-            self.loader_threads.remove(thread_ref)
+        if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
             
         self.is_loading_model_seq = False
         self.update_window_title()
         self.update_button_states()
         self.model_status_changed.emit() 
-        self._process_model_queue() # Trigger next in queue
+        self._process_model_queue() 
 
     def on_model_error(self, name, err, thread_ref):
         QMessageBox.critical(self, "Model Load Error", f"Failed to load {name}:\n{err}")
@@ -258,26 +396,20 @@ class HAScanlatorWindow(QMainWindow):
         elif name == "yolo_detector": self.yolo_is_loading = False
         elif name == "nmt_translator": self.nmt_is_loading = False
             
-        if thread_ref in self.loader_threads: 
-            self.loader_threads.remove(thread_ref)
+        if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
             
         self.is_loading_model_seq = False
         self.update_window_title()
         self.update_button_states()
         self.model_status_changed.emit()
-        self._process_model_queue() # Trigger next in queue
+        self._process_model_queue() 
 
     def unload_model(self, model_name):
-        """Deletes the model from memory to free up RAM."""
-        if model_name == "manga_ocr":
-            self.mocr_model = None
-        elif model_name == "yolo_detector":
-            self.yolo_model = None
-        elif model_name == "nmt_translator":
-            self.nmt_model = None
+        if model_name == "manga_ocr": self.mocr_model = None
+        elif model_name == "yolo_detector": self.yolo_model = None
+        elif model_name == "nmt_translator": self.nmt_model = None
             
-        gc.collect() # Force garbage collection to reclaim RAM
-        
+        gc.collect() 
         self.update_window_title()
         self.update_button_states()
         self.model_status_changed.emit()
@@ -305,7 +437,15 @@ class HAScanlatorWindow(QMainWindow):
         self.nav.update_labels(self.workspace.current_page_number, self.workspace.total_pages)
         
         self.scene.clear() 
-        pixmap = QPixmap(path)
+        
+        # --- Memory Injection for Image Processing ---
+        if path not in self.workspace.original_images:
+            cv_img = self.imread_utf8(path)
+            self.workspace.original_images[path] = cv_img.copy()
+            self.workspace.edited_images[path] = cv_img.copy()
+            self.workspace.undo_stacks[path] = []
+
+        pixmap = self.cv2_to_qpixmap(self.workspace.edited_images[path])
         self.current_image_item = QGraphicsPixmapItem(pixmap)
         self.scene.addItem(self.current_image_item)
         self.scene.setSceneRect(QRectF(pixmap.rect()))
@@ -318,7 +458,13 @@ class HAScanlatorWindow(QMainWindow):
                 box = BoundingBoxItem(b_data['rect'], is_auto=b_data['is_auto'])
                 box.setPos(b_data['pos'])
                 box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
+                box.align = b_data.get('align', Qt.AlignCenter)
+                box.indent = b_data.get('indent', 5)
                 self.scene.addItem(box)
+                
+                # Apply visual Typesetting state if it was toggled on
+                if b_data.get('is_typeset', False):
+                    box.toggle_typeset(force_state=True)
                 
         self.update_window_title()
         self.update_button_states()
@@ -330,7 +476,10 @@ class HAScanlatorWindow(QMainWindow):
         if not self.workspace.current_image_path: return
         boxes = [{
             'rect': item.rect(), 'pos': item.scenePos(), 'is_auto': item.is_auto,
-            'raw_text': item.raw_text, 'translated_text': item.translated_text
+            'raw_text': item.raw_text, 'translated_text': item.translated_text,
+            'is_typeset': getattr(item, 'is_typeset', False),
+            'align': getattr(item, 'align', Qt.AlignCenter),
+            'indent': getattr(item, 'indent', 5)
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
         self.workspace.save_page_state(self.workspace.current_image_path, boxes)
 
@@ -377,6 +526,8 @@ class HAScanlatorWindow(QMainWindow):
     def on_trans_text_edited(self):
         if not self._updating_ui and self.current_selected_box:
             self.current_selected_box.translated_text = self.right_dock.trans_input.toPlainText()
+            if self.current_selected_box.is_typeset:
+                self.current_selected_box.update_typeset()
 
     def add_test_box(self):
         if not self.current_image_item: return
@@ -437,7 +588,6 @@ class HAScanlatorWindow(QMainWindow):
             self.set_processing_lock(False)
             self.update_window_title()
             
-        # Ensure we save right after auto-process finishes
         self.save_current_page_state()
         
     def on_detection_error(self, err_msg):
@@ -491,7 +641,6 @@ class HAScanlatorWindow(QMainWindow):
         self.set_processing_lock(True)
         self.update_window_title("Translating text...")
         self.right_dock.trans_input.setPlaceholderText("Translating...")
-        
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -526,7 +675,6 @@ class HAScanlatorWindow(QMainWindow):
         self._start_translation_worker(engine, boxes_data)
 
     def _start_translation_worker(self, engine, boxes_data):
-        # Fetch the selected languages from the UI preferences
         src_lang = self.settings.value("trans_src", "ja")
         tgt_lang = self.settings.value("trans_tgt", "en")
         
@@ -543,6 +691,9 @@ class HAScanlatorWindow(QMainWindow):
             self._updating_ui = True
             self.right_dock.trans_input.setPlainText(translated_text)
             self._updating_ui = False
+            
+            if self.current_selected_box.is_typeset:
+                self.current_selected_box.update_typeset()
 
     def on_batch_translation_finished(self):
         self.progress_bar.setVisible(False)

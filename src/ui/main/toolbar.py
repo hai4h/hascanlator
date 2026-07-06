@@ -12,6 +12,10 @@ class MainToolbar(QWidget):
         
         self.btn_load = QPushButton("Load Images")
         self.btn_reset = QPushButton("Reset")
+        
+        self.btn_peek = QPushButton("Peek Original (Hold)")
+        self.btn_undo = QPushButton("Undo Image Edit")
+        
         self.chk_auto_process = QCheckBox("Auto-Scan")
         
         self.btn_auto_detect = QPushButton("Auto Detect")
@@ -20,6 +24,8 @@ class MainToolbar(QWidget):
         
         layout.addWidget(self.btn_load)
         layout.addWidget(self.btn_reset)
+        layout.addWidget(self.btn_peek)
+        layout.addWidget(self.btn_undo)
         layout.addWidget(QLabel("<hr>"))
         layout.addWidget(self.chk_auto_process)
         layout.addWidget(self.btn_auto_detect)

@@ -1,5 +1,5 @@
-from PySide6.QtWidgets import QGraphicsRectItem
-from PySide6.QtGui import QPen, QColor
+from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsTextItem
+from PySide6.QtGui import QPen, QColor, QFont
 from PySide6.QtCore import Qt
 
 class BoundingBoxItem(QGraphicsRectItem):
@@ -24,21 +24,64 @@ class BoundingBoxItem(QGraphicsRectItem):
         
         self.raw_text = ""
         self.translated_text = ""
+        
+        # --- Typesetting Variables ---
+        self.text_item = QGraphicsTextItem(self)
+        self.text_item.hide()
+        self.is_typeset = False
+        self.align = Qt.AlignCenter
+        self.indent = 5
 
-    def itemChange(self, change, value):
-        if change == QGraphicsRectItem.ItemSelectedHasChanged:
+    def update_typeset(self):
+        """Re-renders the text box to fit bounds and alignment."""
+        r = self.rect()
+        self.text_item.setPos(r.topLeft())
+        self.text_item.setTextWidth(r.width())
+        
+        align_str = "center"
+        if self.align == Qt.AlignLeft: align_str = "left"
+        elif self.align == Qt.AlignRight: align_str = "right"
+        
+        text = self.translated_text.replace('\n', '<br>')
+        html = f"<div align='{align_str}' style='margin: {self.indent}px; color: black; font-family: sans-serif; font-size: 16px; font-weight: bold;'>{text}</div>"
+        self.text_item.setHtml(html)
+
+    def toggle_typeset(self, force_state=None):
+        self.is_typeset = force_state if force_state is not None else not self.is_typeset
+        self.text_item.setVisible(self.is_typeset)
+        
+        if self.is_typeset:
+            self.update_typeset()
+            self.setBrush(Qt.transparent)
+            if self.isSelected():
+                self.setPen(QPen(QColor(100, 100, 255), 1, Qt.DashLine))
+            else:
+                self.setPen(QPen(Qt.transparent))
+        else:
             self.setBrush(self.brush_selected if self.isSelected() else self.brush_normal)
             pen = QPen(QColor(255, 100, 100) if self.isSelected() else QColor(0, 255, 0), 2)
             pen.setCosmetic(True)
             self.setPen(pen)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsRectItem.ItemSelectedHasChanged:
+            if self.is_typeset:
+                if self.isSelected():
+                    self.setPen(QPen(QColor(100, 100, 255), 1, Qt.DashLine))
+                else:
+                    self.setPen(QPen(Qt.transparent))
+                self.setBrush(Qt.transparent)
+            else:
+                self.setBrush(self.brush_selected if self.isSelected() else self.brush_normal)
+                pen = QPen(QColor(255, 100, 100) if self.isSelected() else QColor(0, 255, 0), 2)
+                pen.setCosmetic(True)
+                self.setPen(pen)
         return super().itemChange(change, value)
 
     def get_handle_at(self, pos):
         r, x, y = self.rect(), pos.x(), pos.y()
-        l = abs(x - r.left()) <= self.handle_size
-        rt = abs(x - r.right()) <= self.handle_size
-        t = abs(y - r.top()) <= self.handle_size
-        b = abs(y - r.bottom()) <= self.handle_size
+        l, rt = abs(x - r.left()) <= self.handle_size, abs(x - r.right()) <= self.handle_size
+        t, b = abs(y - r.top()) <= self.handle_size, abs(y - r.bottom()) <= self.handle_size
         
         if t and l: return self.TOP_LEFT
         if t and rt: return self.TOP_RIGHT
@@ -72,8 +115,7 @@ class BoundingBoxItem(QGraphicsRectItem):
         if self.current_handle != self.NONE and self.isSelected():
             self.resizing_handle = self.current_handle
             event.accept()
-        else: 
-            super().mousePressEvent(event)
+        else: super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if self.resizing_handle != self.NONE:
@@ -82,14 +124,15 @@ class BoundingBoxItem(QGraphicsRectItem):
             if self.resizing_handle in (self.RIGHT, self.TOP_RIGHT, self.BOTTOM_RIGHT): rect.setRight(max(pos.x(), rect.left() + min_size))
             if self.resizing_handle in (self.TOP, self.TOP_LEFT, self.TOP_RIGHT): rect.setTop(min(pos.y(), rect.bottom() - min_size))
             if self.resizing_handle in (self.BOTTOM, self.BOTTOM_LEFT, self.BOTTOM_RIGHT): rect.setBottom(max(pos.y(), rect.top() + min_size))
+            
             self.setRect(rect)
+            if self.is_typeset:
+                self.update_typeset()
             event.accept()
-        else: 
-            super().mouseMoveEvent(event)
+        else: super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if self.resizing_handle != self.NONE:
             self.resizing_handle = self.NONE
             event.accept()
-        else: 
-            super().mouseReleaseEvent(event)
+        else: super().mouseReleaseEvent(event)
