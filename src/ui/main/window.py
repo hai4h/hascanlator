@@ -1,21 +1,13 @@
 import os
-import gc
 import psutil
-import cv2
-import numpy as np
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QMessageBox, QProgressBar, QLabel
+    QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QProgressBar, QLabel
 )
 from PySide6.QtCore import Qt, QRectF, Signal, QSettings, QTimer
-from PySide6.QtGui import QPixmap, QImage
 
 from src.core.workspace import WorkspaceManager
-from src.core.detection_worker import DetectionWorker
-from src.core.loader_worker import ModelLoaderWorker
-from src.core.ocr_worker import BatchOCRWorker
-from src.core.translation_worker import BatchTranslationWorker
 
 from src.ui.canvas.view import MangaCanvasView
 from src.ui.canvas.items import BoundingBoxItem
@@ -26,7 +18,11 @@ from src.ui.main.panels import EditorDockWidget
 from src.ui.main.toolbar import MainToolbar
 from src.ui.main.navigation import BottomNavigation
 
-class HAScanlatorWindow(QMainWindow):
+from src.ui.main.mixins.image_mixin import ImageOperationsMixin
+from src.ui.main.mixins.model_mixin import ModelManagementMixin
+from src.ui.main.mixins.processing_mixin import WorkerProcessingMixin
+
+class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin, WorkerProcessingMixin):
     model_status_changed = Signal()
 
     def __init__(self):
@@ -234,102 +230,6 @@ class HAScanlatorWindow(QMainWindow):
         self.is_processing = locked
         self.update_button_states()
 
-    # --- OPENCV IMAGE HELPERS ---
-    def imread_utf8(self, filepath):
-        """Allows cv2 to load files that contain non-ascii characters in their folder path."""
-        img_array = np.fromfile(filepath, np.uint8)
-        return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-    def cv2_to_qpixmap(self, cv_img):
-        """Converts an OpenCV BGR numpy array to QPixmap for rendering."""
-        h, w, ch = cv_img.shape
-        bytes_per_line = ch * w
-        converted = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-        qimg = QImage(converted.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        return QPixmap.fromImage(qimg)
-
-    # --- PEEK AND UNDO LOGIC ---
-    def show_original_image(self):
-        path = self.workspace.current_image_path
-        if path and path in self.workspace.original_images:
-            self.current_image_item.setPixmap(self.cv2_to_qpixmap(self.workspace.original_images[path]))
-
-    def show_edited_image(self):
-        path = self.workspace.current_image_path
-        if path and path in self.workspace.edited_images:
-            self.current_image_item.setPixmap(self.cv2_to_qpixmap(self.workspace.edited_images[path]))
-
-    def undo_edit(self):
-        path = self.workspace.current_image_path
-        if path and self.workspace.undo_stacks.get(path):
-            last_img = self.workspace.undo_stacks[path].pop()
-            self.workspace.edited_images[path] = last_img
-            self.show_edited_image()
-            self.update_button_states()
-
-    def smart_clean_bubble(self):
-        if not self.workspace.current_image_path or not self.current_selected_box: return
-        path = self.workspace.current_image_path
-        
-        # 1. Save Undo State
-        current_img = self.workspace.edited_images[path].copy()
-        self.workspace.undo_stacks[path].append(current_img)
-        if len(self.workspace.undo_stacks[path]) > 5:
-            self.workspace.undo_stacks[path].pop(0)
-            
-        rect = self.current_selected_box.sceneBoundingRect()
-        x, y, w, h = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
-        
-        img = self.workspace.edited_images[path]
-        
-        # 2. Boundary Safety Check
-        x, y = max(0, x), max(0, y)
-        w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
-        if w <= 0 or h <= 0: return
-        
-        roi = img[y:y+h, x:x+w]
-        
-        # 3. Smart Masking
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        
-        # Use Otsu's thresholding to find the core black text
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        clean_mask = np.zeros_like(gray)
-        
-        for contour in contours:
-            cx, cy, cw, ch = cv2.boundingRect(contour)
-            
-            # Filter 1: Edge touching (increased margin slightly to 3 for safety)
-            margin = 3
-            touches_edge = (cx <= margin) or (cy <= margin) or (cx + cw >= w - margin) or (cy + ch >= h - margin)
-            
-            # Filter 2: Too huge
-            area = cv2.contourArea(contour)
-            too_huge = area > (w * h * 0.5)
-            
-            if not touches_edge and not too_huge:
-                cv2.drawContours(clean_mask, [contour], -1, 255, thickness=cv2.FILLED)
-        
-        # 4. Aggressive Mask Expansion
-        # Use an Ellipse kernel to evenly expand the mask in all directions
-        # Iterations=2 makes the mask fat enough to completely swallow grey JPEG artifacts
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        clean_mask = cv2.dilate(clean_mask, kernel, iterations=2)
-        
-        # 5. Erase text
-        # Radius 7 forces the algorithm to look further away (past the halo) for clean replacement colors
-        cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_TELEA)
-        
-        img[y:y+h, x:x+w] = cleaned_roi
-        
-        # 6. Save and Render
-        self.workspace.edited_images[path] = img
-        self.show_edited_image()
-        self.update_button_states()
-
     # --- TYPESETTING CONTROLS ---
     def toggle_typeset_view(self):
         if not self.current_selected_box: return
@@ -346,73 +246,6 @@ class HAScanlatorWindow(QMainWindow):
         self.current_selected_box.indent = max(0, self.current_selected_box.indent + delta)
         if self.current_selected_box.is_typeset:
             self.current_selected_box.update_typeset()
-
-    # --- MODEL LOADING LOGIC ---
-    def load_model(self, model_name):
-        if model_name not in self.model_load_queue:
-            self.model_load_queue.append(model_name)
-            self.model_status_changed.emit()
-        self._process_model_queue()
-
-    def _process_model_queue(self):
-        if self.is_loading_model_seq or not self.model_load_queue: return
-            
-        model_name = self.model_load_queue.pop(0)
-        self.is_loading_model_seq = True
-
-        if model_name == "manga_ocr": self.mocr_is_loading = True
-        elif model_name == "yolo_detector": self.yolo_is_loading = True
-        elif model_name == "nmt_translator": self.nmt_is_loading = True
-            
-        self.update_window_title()
-        self.model_status_changed.emit()
-        self.update_button_states()
-        
-        loader = ModelLoaderWorker(model_name)
-        self.loader_threads.append(loader)
-        loader.finished.connect(lambda m, n, t=loader: self.on_model_loaded(m, n, t))
-        loader.error.connect(lambda n, e, t=loader: self.on_model_error(n, e, t))
-        loader.start()
-
-    def on_model_loaded(self, model, name, thread_ref):
-        if name == "manga_ocr":
-            self.mocr_model, self.mocr_is_loading = model, False
-        elif name == "yolo_detector":
-            self.yolo_model, self.yolo_is_loading = model, False
-        elif name == "nmt_translator":
-            self.nmt_model, self.nmt_is_loading = model, False
-
-        if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
-            
-        self.is_loading_model_seq = False
-        self.update_window_title()
-        self.update_button_states()
-        self.model_status_changed.emit() 
-        self._process_model_queue() 
-
-    def on_model_error(self, name, err, thread_ref):
-        QMessageBox.critical(self, "Model Load Error", f"Failed to load {name}:\n{err}")
-        if name == "manga_ocr": self.mocr_is_loading = False
-        elif name == "yolo_detector": self.yolo_is_loading = False
-        elif name == "nmt_translator": self.nmt_is_loading = False
-            
-        if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
-            
-        self.is_loading_model_seq = False
-        self.update_window_title()
-        self.update_button_states()
-        self.model_status_changed.emit()
-        self._process_model_queue() 
-
-    def unload_model(self, model_name):
-        if model_name == "manga_ocr": self.mocr_model = None
-        elif model_name == "yolo_detector": self.yolo_model = None
-        elif model_name == "nmt_translator": self.nmt_model = None
-            
-        gc.collect() 
-        self.update_window_title()
-        self.update_button_states()
-        self.model_status_changed.emit()
 
     # --- WORKSPACE & NAVIGATION LOGIC ---
     def load_images_dialog(self):
@@ -540,171 +373,3 @@ class HAScanlatorWindow(QMainWindow):
     def delete_selected_box(self):
         if self.current_selected_box:
             self.scene.removeItem(self.current_selected_box)
-
-    # --- DETECTION & OCR LOGIC ---
-    def run_auto_detect(self):
-        if not self.workspace.current_image_path or not self.yolo_model: return
-        
-        for item in self.scene.items():
-            if isinstance(item, BoundingBoxItem) and getattr(item, 'is_auto', False):
-                self.scene.removeItem(item)
-
-        self.set_processing_lock(True)
-        self.update_window_title("Detecting Text...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
-        self.statusBar().showMessage("Detecting text regions...")
-        
-        self.detect_worker = DetectionWorker(self.workspace.current_image_path, self.yolo_model)
-        self.detect_worker.finished.connect(self.on_detection_finished)
-        self.detect_worker.error.connect(self.on_detection_error)
-        self.detect_worker.start()
-
-    def on_detection_finished(self, boxes):
-        new_boxes = []
-        for rect in boxes:
-            box_item = BoundingBoxItem(rect, is_auto=True)
-            self.scene.addItem(box_item)
-            new_boxes.append(box_item)
-            
-        if self.mocr_model and new_boxes:
-            self.update_window_title("Reading Text...")
-            self.statusBar().showMessage("Performing Optical Character Recognition...")
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(0)
-            
-            boxes_data = [( (int(b.sceneBoundingRect().x()), int(b.sceneBoundingRect().y()), 
-                             int(b.sceneBoundingRect().width()), int(b.sceneBoundingRect().height())), b) 
-                          for b in new_boxes]
-                
-            self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
-            self.ocr_worker.progress.connect(self.on_ocr_progress)
-            self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
-            self.ocr_worker.finished.connect(self.on_batch_ocr_finished)
-            self.ocr_worker.start()
-        else:
-            self.progress_bar.setVisible(False)
-            self.statusBar().showMessage("Detection Complete.")
-            self.set_processing_lock(False)
-            self.update_window_title()
-            
-        self.save_current_page_state()
-        
-    def on_detection_error(self, err_msg):
-        QMessageBox.critical(self, "Detection Error", str(err_msg))
-        self.progress_bar.setVisible(False)
-        self.statusBar().showMessage("Error during detection.")
-        self.set_processing_lock(False)
-        self.update_window_title()
-
-    def run_ocr_on_selected(self):
-        if not self.workspace.current_image_path or not self.current_selected_box or not self.mocr_model: return
-        
-        r = self.current_selected_box.sceneBoundingRect()
-        crop_rect = (int(r.x()), int(r.y()), int(r.width()), int(r.height()))
-        
-        self.set_processing_lock(True)
-        self.update_window_title("Reading text...")
-        self.right_dock.ocr_input.setPlaceholderText("Reading text...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.statusBar().showMessage("Reading selected box...")
-        
-        self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, [(crop_rect, self.current_selected_box)])
-        self.ocr_worker.progress.connect(self.on_ocr_progress)
-        self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
-        self.ocr_worker.finished.connect(self.on_batch_ocr_finished)
-        self.ocr_worker.start()
-
-    def on_ocr_progress(self, text, box_item_ref):
-        box_item_ref.raw_text = text
-        if self.current_selected_box == box_item_ref:
-            self._updating_ui = True
-            self.right_dock.ocr_input.setPlainText(text)
-            self._updating_ui = False
-
-    def on_batch_ocr_finished(self):
-        self.progress_bar.setVisible(False)
-        self.statusBar().showMessage("Processing Complete.")
-        self.set_processing_lock(False)
-        self.update_window_title()
-
-    # --- TRANSLATION LOGIC ---
-    def run_translation_on_selected(self):
-        engine = self.settings.value("translation_engine", "google")
-        if not self.workspace.current_image_path or not self.current_selected_box: 
-            return
-        if engine == "nmt" and not self.nmt_model:
-            return
-        
-        self.set_processing_lock(True)
-        self.update_window_title("Translating text...")
-        self.right_dock.trans_input.setPlaceholderText("Translating...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.statusBar().showMessage("Translating selected box...")
-        
-        boxes_data = [(self.current_selected_box.raw_text, self.current_selected_box)]
-        self._start_translation_worker(engine, boxes_data)
-
-    def run_translation_on_all(self):
-        engine = self.settings.value("translation_engine", "google")
-        if not self.workspace.current_image_path: 
-            return
-        if engine == "nmt" and not self.nmt_model:
-            return
-            
-        boxes_data = []
-        for item in self.scene.items():
-            if isinstance(item, BoundingBoxItem) and item.raw_text.strip():
-                boxes_data.append((item.raw_text, item))
-                
-        if not boxes_data:
-            self.statusBar().showMessage("No OCR text found to translate.")
-            return
-
-        self.set_processing_lock(True)
-        self.update_window_title("Translating all boxes...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.statusBar().showMessage("Translating page...")
-        
-        self._start_translation_worker(engine, boxes_data)
-
-    def _start_translation_worker(self, engine, boxes_data):
-        src_lang = self.settings.value("trans_src", "ja")
-        tgt_lang = self.settings.value("trans_tgt", "en")
-        
-        self.translation_worker = BatchTranslationWorker(engine, self.nmt_model, boxes_data, src_lang, tgt_lang)
-        self.translation_worker.progress.connect(self.on_translation_progress)
-        self.translation_worker.progress_percent.connect(self.progress_bar.setValue)
-        self.translation_worker.finished.connect(self.on_batch_translation_finished)
-        self.translation_worker.error.connect(self.on_translation_error)
-        self.translation_worker.start()
-
-    def on_translation_progress(self, translated_text, box_item_ref):
-        box_item_ref.translated_text = translated_text
-        if self.current_selected_box == box_item_ref:
-            self._updating_ui = True
-            self.right_dock.trans_input.setPlainText(translated_text)
-            self._updating_ui = False
-            
-            if self.current_selected_box.is_typeset:
-                self.current_selected_box.update_typeset()
-
-    def on_batch_translation_finished(self):
-        self.progress_bar.setVisible(False)
-        self.statusBar().showMessage("Translation Complete.")
-        self.set_processing_lock(False)
-        self.update_window_title()
-        self.save_current_page_state()
-        
-    def on_translation_error(self, err_msg):
-        QMessageBox.critical(self, "Translation Error", str(err_msg))
-        self.progress_bar.setVisible(False)
-        self.statusBar().showMessage("Error during translation.")
-        self.set_processing_lock(False)
-        self.update_window_title()
