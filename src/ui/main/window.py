@@ -145,6 +145,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.right_dock.btn_align_left.clicked.connect(lambda: self.set_text_alignment(Qt.AlignLeft))
         self.right_dock.btn_align_center.clicked.connect(lambda: self.set_text_alignment(Qt.AlignCenter))
         self.right_dock.btn_align_right.clicked.connect(lambda: self.set_text_alignment(Qt.AlignRight))
+        self.right_dock.btn_valign_top.clicked.connect(lambda: self.set_text_valignment(Qt.AlignTop))
+        self.right_dock.btn_valign_middle.clicked.connect(lambda: self.set_text_valignment(Qt.AlignVCenter))
+        self.right_dock.btn_valign_bottom.clicked.connect(lambda: self.set_text_valignment(Qt.AlignBottom))
         
         self.right_dock.btn_indent_plus.clicked.connect(lambda: self.set_text_indent(5))
         self.right_dock.btn_indent_minus.clicked.connect(lambda: self.set_text_indent(-5))
@@ -207,6 +210,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.right_dock.btn_align_left.setEnabled(has_box)
         self.right_dock.btn_align_center.setEnabled(has_box)
         self.right_dock.btn_align_right.setEnabled(has_box)
+        self.right_dock.btn_valign_top.setEnabled(has_box)
+        self.right_dock.btn_valign_middle.setEnabled(has_box)
+        self.right_dock.btn_valign_bottom.setEnabled(has_box)
         self.right_dock.btn_indent_minus.setEnabled(has_box)
         self.right_dock.btn_indent_plus.setEnabled(has_box)
             
@@ -229,23 +235,6 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
     def set_processing_lock(self, locked):
         self.is_processing = locked
         self.update_button_states()
-
-    # --- TYPESETTING CONTROLS ---
-    def toggle_typeset_view(self):
-        if not self.current_selected_box: return
-        self.current_selected_box.toggle_typeset()
-        
-    def set_text_alignment(self, align):
-        if not self.current_selected_box: return
-        self.current_selected_box.align = align
-        if self.current_selected_box.is_typeset:
-            self.current_selected_box.update_typeset()
-
-    def set_text_indent(self, delta):
-        if not self.current_selected_box: return
-        self.current_selected_box.indent = max(0, self.current_selected_box.indent + delta)
-        if self.current_selected_box.is_typeset:
-            self.current_selected_box.update_typeset()
 
     # --- WORKSPACE & NAVIGATION LOGIC ---
     def load_images_dialog(self):
@@ -292,10 +281,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box.setPos(b_data['pos'])
                 box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
                 box.align = b_data.get('align', Qt.AlignCenter)
+                box.valign = b_data.get('valign', Qt.AlignVCenter) # Added line
                 box.indent = b_data.get('indent', 5)
                 self.scene.addItem(box)
                 
-                # Apply visual Typesetting state if it was toggled on
                 if b_data.get('is_typeset', False):
                     box.toggle_typeset(force_state=True)
                 
@@ -312,6 +301,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'raw_text': item.raw_text, 'translated_text': item.translated_text,
             'is_typeset': getattr(item, 'is_typeset', False),
             'align': getattr(item, 'align', Qt.AlignCenter),
+            'valign': getattr(item, 'valign', Qt.AlignVCenter), # Added line
             'indent': getattr(item, 'indent', 5)
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
         self.workspace.save_page_state(self.workspace.current_image_path, boxes)

@@ -43,6 +43,7 @@ class EditorDockWidget(QDockWidget):
         ts_layout = QVBoxLayout()
         ts_layout.addWidget(QLabel("<hr><b>Typesetting & Cleaning</b>"))
         
+        # Horizontal Align
         align_layout = QHBoxLayout()
         self.btn_align_left = QPushButton("Left")
         self.btn_align_center = QPushButton("Center")
@@ -52,6 +53,17 @@ class EditorDockWidget(QDockWidget):
         align_layout.addWidget(self.btn_align_right)
         ts_layout.addLayout(align_layout)
 
+        # Vertical Align
+        valign_layout = QHBoxLayout()
+        self.btn_valign_top = QPushButton("Top")
+        self.btn_valign_middle = QPushButton("Middle")
+        self.btn_valign_bottom = QPushButton("Bottom")
+        valign_layout.addWidget(self.btn_valign_top)
+        valign_layout.addWidget(self.btn_valign_middle)
+        valign_layout.addWidget(self.btn_valign_bottom)
+        ts_layout.addLayout(valign_layout)
+
+        # Indent
         indent_layout = QHBoxLayout()
         self.btn_indent_minus = QPushButton("- Indent")
         self.btn_indent_plus = QPushButton("+ Indent")
@@ -68,6 +80,9 @@ class EditorDockWidget(QDockWidget):
         self.btn_align_left.setEnabled(False)
         self.btn_align_center.setEnabled(False)
         self.btn_align_right.setEnabled(False)
+        self.btn_valign_top.setEnabled(False)
+        self.btn_valign_middle.setEnabled(False)
+        self.btn_valign_bottom.setEnabled(False)
         self.btn_indent_minus.setEnabled(False)
         self.btn_indent_plus.setEnabled(False)
         self.btn_clean_bubble.setEnabled(False)

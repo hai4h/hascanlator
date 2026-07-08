@@ -95,3 +95,26 @@ class ImageOperationsMixin:
         self.workspace.edited_images[path] = img
         self.show_edited_image()
         self.update_button_states()
+
+    # --- TYPESETTING CONTROLS ---
+    def toggle_typeset_view(self):
+        if not self.current_selected_box: return
+        self.current_selected_box.toggle_typeset()
+        
+    def set_text_alignment(self, align):
+        if not self.current_selected_box: return
+        self.current_selected_box.align = align
+        if self.current_selected_box.is_typeset:
+            self.current_selected_box.update_typeset()
+
+    def set_text_indent(self, delta):
+        if not self.current_selected_box: return
+        self.current_selected_box.indent = max(0, self.current_selected_box.indent + delta)
+        if self.current_selected_box.is_typeset:
+            self.current_selected_box.update_typeset()
+
+    def set_text_valignment(self, valign):
+        if not self.current_selected_box: return
+        self.current_selected_box.valign = valign
+        if self.current_selected_box.is_typeset:
+            self.current_selected_box.update_typeset()

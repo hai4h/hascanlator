@@ -30,14 +30,15 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.text_item.hide()
         self.is_typeset = False
         self.align = Qt.AlignCenter
+        self.valign = Qt.AlignVCenter # Added vertical alignment
         self.indent = 5
 
     def update_typeset(self):
         """Re-renders the text box to fit bounds and alignment."""
         r = self.rect()
-        self.text_item.setPos(r.topLeft())
         self.text_item.setTextWidth(r.width())
         
+        # Horizontal alignment
         align_str = "center"
         if self.align == Qt.AlignLeft: align_str = "left"
         elif self.align == Qt.AlignRight: align_str = "right"
@@ -45,6 +46,19 @@ class BoundingBoxItem(QGraphicsRectItem):
         text = self.translated_text.replace('\n', '<br>')
         html = f"<div align='{align_str}' style='margin: {self.indent}px; color: black; font-family: sans-serif; font-size: 16px; font-weight: bold;'>{text}</div>"
         self.text_item.setHtml(html)
+
+        # Vertical alignment
+        text_h = self.text_item.boundingRect().height()
+        box_h = r.height()
+        
+        if self.valign == Qt.AlignTop:
+            y_pos = r.top()
+        elif self.valign == Qt.AlignBottom:
+            y_pos = r.bottom() - text_h
+        else: # Qt.AlignVCenter
+            y_pos = r.top() + (box_h - text_h) / 2.0
+            
+        self.text_item.setPos(r.left(), y_pos)
 
     def toggle_typeset(self, force_state=None):
         self.is_typeset = force_state if force_state is not None else not self.is_typeset
