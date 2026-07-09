@@ -71,7 +71,7 @@ class EditorDockWidget(QDockWidget):
         indent_layout.addWidget(self.btn_indent_plus)
         ts_layout.addLayout(indent_layout)
         
-        self.btn_clean_bubble = QPushButton("Smart Clean Bubble")
+        self.btn_clean_bubble = QPushButton("Text Erase")
         self.btn_toggle_typeset = QPushButton("Toggle Typeset Visibility")
         
         ts_layout.addWidget(self.btn_clean_bubble)

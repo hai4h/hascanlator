@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 from PySide6.QtGui import QPixmap, QImage
 
+from src.ui.canvas.items import BoundingBoxItem
+
 class ImageOperationsMixin:
     # --- OPENCV IMAGE HELPERS ---
     def imread_utf8(self, filepath):
@@ -37,7 +39,10 @@ class ImageOperationsMixin:
             self.update_button_states()
 
     def smart_clean_bubble(self):
-        if not self.workspace.current_image_path or not self.current_selected_box: return
+        selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
+        if not self.workspace.current_image_path or not selected_boxes: 
+            return
+            
         path = self.workspace.current_image_path
         
         # 1. Save Undo State
@@ -46,50 +51,44 @@ class ImageOperationsMixin:
         if len(self.workspace.undo_stacks[path]) > 5:
             self.workspace.undo_stacks[path].pop(0)
             
-        rect = self.current_selected_box.sceneBoundingRect()
-        x, y, w, h = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
-        
         img = self.workspace.edited_images[path]
         
-        # 2. Boundary Safety Check
-        x, y = max(0, x), max(0, y)
-        w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
-        if w <= 0 or h <= 0: return
-        
-        roi = img[y:y+h, x:x+w]
-        
-        # 3. Smart Masking
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        
-        # Use Otsu's thresholding to find the core black text
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        clean_mask = np.zeros_like(gray)
-        
-        for contour in contours:
-            cx, cy, cw, ch = cv2.boundingRect(contour)
+        for box in selected_boxes:
+            rect = box.sceneBoundingRect()
+            x, y, w, h = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
             
-            # Filter 1: Edge touching (increased margin slightly to 3 for safety)
-            margin = 3
-            touches_edge = (cx <= margin) or (cy <= margin) or (cx + cw >= w - margin) or (cy + ch >= h - margin)
+            # 2. Boundary Safety Check
+            x, y = max(0, x), max(0, y)
+            w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
+            if w <= 0 or h <= 0: continue
             
-            # Filter 2: Too huge
-            area = cv2.contourArea(contour)
-            too_huge = area > (w * h * 0.5)
+            roi = img[y:y+h, x:x+w]
             
-            if not touches_edge and not too_huge:
-                cv2.drawContours(clean_mask, [contour], -1, 255, thickness=cv2.FILLED)
-        
-        # 4. Aggressive Mask Expansion
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-        clean_mask = cv2.dilate(clean_mask, kernel, iterations=2)
-        
-        # 5. Erase text
-        cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_TELEA)
-        
-        img[y:y+h, x:x+w] = cleaned_roi
+            # 3. Smart Masking
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            
+            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            clean_mask = np.zeros_like(gray)
+            
+            for contour in contours:
+                cx, cy, cw, ch = cv2.boundingRect(contour)
+                margin = 3
+                touches_edge = (cx <= margin) or (cy <= margin) or (cx + cw >= w - margin) or (cy + ch >= h - margin)
+                area = cv2.contourArea(contour)
+                too_huge = area > (w * h * 0.5)
+                
+                if not touches_edge and not too_huge:
+                    cv2.drawContours(clean_mask, [contour], -1, 255, thickness=cv2.FILLED)
+            
+            # 4. Aggressive Mask Expansion
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+            clean_mask = cv2.dilate(clean_mask, kernel, iterations=2)
+            
+            # 5. Erase text
+            cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_TELEA)
+            img[y:y+h, x:x+w] = cleaned_roi
         
         # 6. Save and Render
         self.workspace.edited_images[path] = img
@@ -98,23 +97,27 @@ class ImageOperationsMixin:
 
     # --- TYPESETTING CONTROLS ---
     def toggle_typeset_view(self):
-        if not self.current_selected_box: return
-        self.current_selected_box.toggle_typeset()
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.toggle_typeset()
         
     def set_text_alignment(self, align):
-        if not self.current_selected_box: return
-        self.current_selected_box.align = align
-        if self.current_selected_box.is_typeset:
-            self.current_selected_box.update_typeset()
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.align = align
+                if box.is_typeset:
+                    box.update_typeset()
 
     def set_text_indent(self, delta):
-        if not self.current_selected_box: return
-        self.current_selected_box.indent = max(0, self.current_selected_box.indent + delta)
-        if self.current_selected_box.is_typeset:
-            self.current_selected_box.update_typeset()
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.indent = max(0, box.indent + delta)
+                if box.is_typeset:
+                    box.update_typeset()
 
     def set_text_valignment(self, valign):
-        if not self.current_selected_box: return
-        self.current_selected_box.valign = valign
-        if self.current_selected_box.is_typeset:
-            self.current_selected_box.update_typeset()
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.valign = valign
+                if box.is_typeset:
+                    box.update_typeset()

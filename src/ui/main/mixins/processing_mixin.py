@@ -62,10 +62,8 @@ class WorkerProcessingMixin:
         self.update_window_title()
 
     def run_ocr_on_selected(self):
-        if not self.workspace.current_image_path or not self.current_selected_box or not self.mocr_model: return
-        
-        r = self.current_selected_box.sceneBoundingRect()
-        crop_rect = (int(r.x()), int(r.y()), int(r.width()), int(r.height()))
+        selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
+        if not self.workspace.current_image_path or not selected_boxes or not self.mocr_model: return
         
         self.set_processing_lock(True)
         self.update_window_title("Reading text...")
@@ -73,9 +71,15 @@ class WorkerProcessingMixin:
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.statusBar().showMessage("Reading selected box...")
+        self.statusBar().showMessage(f"Reading {len(selected_boxes)} selected boxes...")
         
-        self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, [(crop_rect, self.current_selected_box)])
+        boxes_data = []
+        for box in selected_boxes:
+            r = box.sceneBoundingRect()
+            crop_rect = (int(r.x()), int(r.y()), int(r.width()), int(r.height()))
+            boxes_data.append((crop_rect, box))
+            
+        self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
         self.ocr_worker.progress.connect(self.on_ocr_progress)
         self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
         self.ocr_worker.finished.connect(self.on_batch_ocr_finished)
@@ -97,20 +101,23 @@ class WorkerProcessingMixin:
     # --- TRANSLATION LOGIC ---
     def run_translation_on_selected(self):
         engine = self.settings.value("translation_engine", "google")
-        if not self.workspace.current_image_path or not self.current_selected_box: 
-            return
-        if engine == "nmt" and not self.nmt_model:
-            return
+        selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
+        if not self.workspace.current_image_path or not selected_boxes: return
+        if engine == "nmt" and not self.nmt_model: return
         
+        boxes_data = [(box.raw_text, box) for box in selected_boxes if box.raw_text.strip()]
+        if not boxes_data:
+            self.statusBar().showMessage("No OCR text found in selection.")
+            return
+
         self.set_processing_lock(True)
         self.update_window_title("Translating text...")
         self.right_dock.trans_input.setPlaceholderText("Translating...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.statusBar().showMessage("Translating selected box...")
+        self.statusBar().showMessage(f"Translating {len(boxes_data)} selected boxes...")
         
-        boxes_data = [(self.current_selected_box.raw_text, self.current_selected_box)]
         self._start_translation_worker(engine, boxes_data)
 
     def run_translation_on_all(self):

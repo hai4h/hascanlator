@@ -171,7 +171,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
     def update_button_states(self):
         has_image = self.workspace.has_images
-        has_box = self.current_selected_box is not None
+        selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
+        has_any_box = len(selected_boxes) > 0
         
         # Toolbar State
         self.toolbar.btn_peek.setEnabled(has_image)
@@ -192,29 +193,30 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.right_dock.btn_run_ocr.setEnabled(False)
             self.right_dock.btn_run_ocr.setText("OCR Model Required")
         else:
-            self.right_dock.btn_run_ocr.setEnabled(not self.is_processing and has_image and has_box)
-            self.right_dock.btn_run_ocr.setText("Run OCR on Box")
+            self.right_dock.btn_run_ocr.setEnabled(not self.is_processing and has_image and has_any_box)
+            self.right_dock.btn_run_ocr.setText("Run OCR on Selected")
 
         if self.nmt_model is None:
             self.right_dock.btn_translate_box.setEnabled(False)
             self.right_dock.btn_translate_box.setText("Translator Required")
             self.right_dock.btn_translate_all.setEnabled(False)
         else:
-            self.right_dock.btn_translate_box.setEnabled(not self.is_processing and has_image and has_box)
-            self.right_dock.btn_translate_box.setText("Translate Box")
+            self.right_dock.btn_translate_box.setEnabled(not self.is_processing and has_image and has_any_box)
+            self.right_dock.btn_translate_box.setText("Translate Selected")
             self.right_dock.btn_translate_all.setEnabled(not self.is_processing and has_image)
             
         # Typesetting State
-        self.right_dock.btn_clean_bubble.setEnabled(not self.is_processing and has_image and has_box)
-        self.right_dock.btn_toggle_typeset.setEnabled(has_box)
-        self.right_dock.btn_align_left.setEnabled(has_box)
-        self.right_dock.btn_align_center.setEnabled(has_box)
-        self.right_dock.btn_align_right.setEnabled(has_box)
-        self.right_dock.btn_valign_top.setEnabled(has_box)
-        self.right_dock.btn_valign_middle.setEnabled(has_box)
-        self.right_dock.btn_valign_bottom.setEnabled(has_box)
-        self.right_dock.btn_indent_minus.setEnabled(has_box)
-        self.right_dock.btn_indent_plus.setEnabled(has_box)
+        self.right_dock.btn_delete_box.setEnabled(has_any_box)
+        self.right_dock.btn_clean_bubble.setEnabled(not self.is_processing and has_image and has_any_box)
+        self.right_dock.btn_toggle_typeset.setEnabled(has_any_box)
+        self.right_dock.btn_align_left.setEnabled(has_any_box)
+        self.right_dock.btn_align_center.setEnabled(has_any_box)
+        self.right_dock.btn_align_right.setEnabled(has_any_box)
+        self.right_dock.btn_valign_top.setEnabled(has_any_box)
+        self.right_dock.btn_valign_middle.setEnabled(has_any_box)
+        self.right_dock.btn_valign_bottom.setEnabled(has_any_box)
+        self.right_dock.btn_indent_minus.setEnabled(has_any_box)
+        self.right_dock.btn_indent_plus.setEnabled(has_any_box)
             
         # Navigation
         self.nav.btn_prev.setEnabled(not self.is_processing and self.workspace.current_img_index > 0)
@@ -326,7 +328,6 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self._updating_ui = True 
             dock.ocr_input.setEnabled(True)
             dock.trans_input.setEnabled(True)
-            dock.btn_delete_box.setEnabled(True)
             dock.ocr_input.setPlainText(self.current_selected_box.raw_text)
             dock.trans_input.setPlainText(self.current_selected_box.translated_text)
             self._updating_ui = False 
@@ -337,7 +338,14 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             dock.trans_input.clear()
             dock.ocr_input.setEnabled(False)
             dock.trans_input.setEnabled(False)
-            dock.btn_delete_box.setEnabled(False)
+            
+            if len(boxes) > 1:
+                dock.ocr_input.setPlaceholderText(f"{len(boxes)} boxes selected.")
+                dock.trans_input.setPlaceholderText(f"{len(boxes)} boxes selected.")
+            else:
+                dock.ocr_input.setPlaceholderText("")
+                dock.trans_input.setPlaceholderText("")
+                
             self._updating_ui = False
             
         self.update_button_states()
@@ -361,5 +369,6 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         box.setSelected(True)
 
     def delete_selected_box(self):
-        if self.current_selected_box:
-            self.scene.removeItem(self.current_selected_box)
+        for item in self.scene.selectedItems():
+            if isinstance(item, BoundingBoxItem):
+                self.scene.removeItem(item)
