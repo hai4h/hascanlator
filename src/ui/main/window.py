@@ -17,6 +17,7 @@ from src.ui.settings.dialog import SettingsDialog
 from src.ui.main.panels import EditorDockWidget
 from src.ui.main.toolbar import MainToolbar
 from src.ui.main.navigation import BottomNavigation
+from src.ui.main.typeset import TypesetToolBar
 
 from src.ui.main.mixins.image_mixin import ImageOperationsMixin
 from src.ui.main.mixins.model_mixin import ModelManagementMixin
@@ -79,10 +80,20 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         center_layout = QVBoxLayout(center_area)
         center_layout.setContentsMargins(0, 0, 0, 0)
         
+        # --- NEW CANVAS LAYOUT WITH CONTEXT TOOLBAR ---
+        canvas_layout = QHBoxLayout()
+        canvas_layout.setSpacing(0)
+        
         self.scene = QGraphicsScene()
         self.view = MangaCanvasView(self.scene)
         
-        center_layout.addWidget(self.view, stretch=1)
+        self.typeset_toolbar = TypesetToolBar(self)
+        self.typeset_toolbar.setVisible(False) # Hidden by default
+        
+        canvas_layout.addWidget(self.view, stretch=1)
+        canvas_layout.addWidget(self.typeset_toolbar)
+        
+        center_layout.addLayout(canvas_layout, stretch=1)
         center_layout.addWidget(self.nav)
         
         main_layout.addWidget(self.toolbar)
@@ -113,7 +124,6 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.toolbar.btn_load.clicked.connect(self.load_images_dialog)
         self.toolbar.btn_reset.clicked.connect(self.reset_workspace)
         
-        # Image Manipulation Signals
         self.toolbar.btn_peek.pressed.connect(self.show_original_image)
         self.toolbar.btn_peek.released.connect(self.show_edited_image)
         self.toolbar.btn_undo.clicked.connect(self.undo_edit)
@@ -138,19 +148,19 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.right_dock.btn_translate_box.clicked.connect(self.run_translation_on_selected)
         self.right_dock.btn_translate_all.clicked.connect(self.run_translation_on_all)
         
-        # Typesetting Signals
-        self.right_dock.btn_clean_bubble.clicked.connect(self.smart_clean_bubble)
-        self.right_dock.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
+        # --- BIND NEW CONTEXT TOOLBAR SIGNALS ---
+        self.typeset_toolbar.btn_clean_bubble.clicked.connect(self.smart_clean_bubble)
+        self.typeset_toolbar.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
         
-        self.right_dock.btn_align_left.clicked.connect(lambda: self.set_text_alignment(Qt.AlignLeft))
-        self.right_dock.btn_align_center.clicked.connect(lambda: self.set_text_alignment(Qt.AlignCenter))
-        self.right_dock.btn_align_right.clicked.connect(lambda: self.set_text_alignment(Qt.AlignRight))
-        self.right_dock.btn_valign_top.clicked.connect(lambda: self.set_text_valignment(Qt.AlignTop))
-        self.right_dock.btn_valign_middle.clicked.connect(lambda: self.set_text_valignment(Qt.AlignVCenter))
-        self.right_dock.btn_valign_bottom.clicked.connect(lambda: self.set_text_valignment(Qt.AlignBottom))
+        self.typeset_toolbar.btn_align_left.clicked.connect(lambda: self.set_text_alignment(Qt.AlignLeft))
+        self.typeset_toolbar.btn_align_center.clicked.connect(lambda: self.set_text_alignment(Qt.AlignCenter))
+        self.typeset_toolbar.btn_align_right.clicked.connect(lambda: self.set_text_alignment(Qt.AlignRight))
+        self.typeset_toolbar.btn_valign_top.clicked.connect(lambda: self.set_text_valignment(Qt.AlignTop))
+        self.typeset_toolbar.btn_valign_middle.clicked.connect(lambda: self.set_text_valignment(Qt.AlignVCenter))
+        self.typeset_toolbar.btn_valign_bottom.clicked.connect(lambda: self.set_text_valignment(Qt.AlignBottom))
         
-        self.right_dock.btn_indent_plus.clicked.connect(lambda: self.set_text_indent(5))
-        self.right_dock.btn_indent_minus.clicked.connect(lambda: self.set_text_indent(-5))
+        self.typeset_toolbar.btn_indent_plus.clicked.connect(lambda: self.set_text_indent(5))
+        self.typeset_toolbar.btn_indent_minus.clicked.connect(lambda: self.set_text_indent(-5))
 
     def closeEvent(self, event):
         if self.scene:
@@ -205,18 +215,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.right_dock.btn_translate_box.setText("Translate Selected")
             self.right_dock.btn_translate_all.setEnabled(not self.is_processing and has_image)
             
-        # Typesetting State
         self.right_dock.btn_delete_box.setEnabled(has_any_box)
-        self.right_dock.btn_clean_bubble.setEnabled(not self.is_processing and has_image and has_any_box)
-        self.right_dock.btn_toggle_typeset.setEnabled(has_any_box)
-        self.right_dock.btn_align_left.setEnabled(has_any_box)
-        self.right_dock.btn_align_center.setEnabled(has_any_box)
-        self.right_dock.btn_align_right.setEnabled(has_any_box)
-        self.right_dock.btn_valign_top.setEnabled(has_any_box)
-        self.right_dock.btn_valign_middle.setEnabled(has_any_box)
-        self.right_dock.btn_valign_bottom.setEnabled(has_any_box)
-        self.right_dock.btn_indent_minus.setEnabled(has_any_box)
-        self.right_dock.btn_indent_plus.setEnabled(has_any_box)
+        
+        # Lock contextual toolbar if scanning is happening
+        self.typeset_toolbar.setEnabled(not self.is_processing)
             
         # Navigation
         self.nav.btn_prev.setEnabled(not self.is_processing and self.workspace.current_img_index > 0)
@@ -238,7 +240,6 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.is_processing = locked
         self.update_button_states()
 
-    # --- WORKSPACE & NAVIGATION LOGIC ---
     def load_images_dialog(self):
         file_paths, _ = QFileDialog.getOpenFileNames(self, "Open Manga Pages", "", "Images (*.png *.jpg *.jpeg *.bmp)")
         if file_paths:
@@ -262,7 +263,6 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         
         self.scene.clear() 
         
-        # --- Memory Injection for Image Processing ---
         if path not in self.workspace.original_images:
             cv_img = self.imread_utf8(path)
             self.workspace.original_images[path] = cv_img.copy()
@@ -275,7 +275,6 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.scene.setSceneRect(QRectF(pixmap.rect()))
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
-        # Restore cached boxes
         cached_data = self.workspace.get_page_state(path)
         if cached_data:
             for b_data in cached_data:
@@ -283,7 +282,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box.setPos(b_data['pos'])
                 box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
                 box.align = b_data.get('align', Qt.AlignCenter)
-                box.valign = b_data.get('valign', Qt.AlignVCenter) # Added line
+                box.valign = b_data.get('valign', Qt.AlignVCenter) 
                 box.indent = b_data.get('indent', 5)
                 self.scene.addItem(box)
                 
@@ -303,7 +302,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'raw_text': item.raw_text, 'translated_text': item.translated_text,
             'is_typeset': getattr(item, 'is_typeset', False),
             'align': getattr(item, 'align', Qt.AlignCenter),
-            'valign': getattr(item, 'valign', Qt.AlignVCenter), # Added line
+            'valign': getattr(item, 'valign', Qt.AlignVCenter), 
             'indent': getattr(item, 'indent', 5)
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
         self.workspace.save_page_state(self.workspace.current_image_path, boxes)
@@ -318,10 +317,13 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.save_current_page_state()
             if self.workspace.next_page(): self.render_current_page()
 
-    # --- ITEM INTERACTION LOGIC ---
     def on_selection_changed(self):
         boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
         dock = self.right_dock
+        
+        # --- CONTROL CONTEXT TOOLBAR VISIBILITY ---
+        has_any_box = len(boxes) > 0
+        self.typeset_toolbar.setVisible(has_any_box)
         
         if len(boxes) == 1:
             self.current_selected_box = boxes[0]
