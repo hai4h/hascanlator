@@ -161,6 +161,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         
         self.typeset_toolbar.btn_indent_plus.clicked.connect(lambda: self.set_text_indent(5))
         self.typeset_toolbar.btn_indent_minus.clicked.connect(lambda: self.set_text_indent(-5))
+        self.typeset_toolbar.btn_line_space_plus.clicked.connect(lambda: self.set_text_line_spacing(0.1))
+        self.typeset_toolbar.btn_line_space_minus.clicked.connect(lambda: self.set_text_line_spacing(-0.1))
+        self.typeset_toolbar.btn_align_reset.clicked.connect(self.reset_text_alignment)
+        self.typeset_toolbar.btn_spacing_reset.clicked.connect(self.reset_text_spacing)
 
     def closeEvent(self, event):
         if self.scene:
@@ -284,6 +288,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box.align = b_data.get('align', Qt.AlignCenter)
                 box.valign = b_data.get('valign', Qt.AlignVCenter) 
                 box.indent = b_data.get('indent', 5)
+                box.line_spacing = b_data.get('line_spacing', 1.0)
                 self.scene.addItem(box)
                 
                 if b_data.get('is_typeset', False):
@@ -303,7 +308,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'is_typeset': getattr(item, 'is_typeset', False),
             'align': getattr(item, 'align', Qt.AlignCenter),
             'valign': getattr(item, 'valign', Qt.AlignVCenter), 
-            'indent': getattr(item, 'indent', 5)
+            'indent': getattr(item, 'indent', 5),
+            'line_spacing': getattr(item, 'line_spacing', 1.0)
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
         self.workspace.save_page_state(self.workspace.current_image_path, boxes)
 

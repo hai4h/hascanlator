@@ -32,22 +32,24 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.align = Qt.AlignCenter
         self.valign = Qt.AlignVCenter # Added vertical alignment
         self.indent = 5
+        self.line_spacing = 1.0
 
     def update_typeset(self):
         """Re-renders the text box to fit bounds and alignment."""
         r = self.rect()
         self.text_item.setTextWidth(r.width())
         
-        # Horizontal alignment
         align_str = "center"
         if self.align == Qt.AlignLeft: align_str = "left"
         elif self.align == Qt.AlignRight: align_str = "right"
         
         text = self.translated_text.replace('\n', '<br>')
-        html = f"<div align='{align_str}' style='margin: {self.indent}px; color: black; font-family: sans-serif; font-size: 16px; font-weight: bold;'>{text}</div>"
+        
+        # --- ADD line-height: {self.line_spacing} TO THE STYLE STRING ---
+        html = f"<div align='{align_str}' style='margin: {self.indent}px; line-height: {self.line_spacing}; color: black; font-family: sans-serif; font-size: 16px; font-weight: bold;'>{text}</div>"
+        
         self.text_item.setHtml(html)
 
-        # Vertical alignment
         text_h = self.text_item.boundingRect().height()
         box_h = r.height()
         
@@ -55,7 +57,7 @@ class BoundingBoxItem(QGraphicsRectItem):
             y_pos = r.top()
         elif self.valign == Qt.AlignBottom:
             y_pos = r.bottom() - text_h
-        else: # Qt.AlignVCenter
+        else: 
             y_pos = r.top() + (box_h - text_h) / 2.0
             
         self.text_item.setPos(r.left(), y_pos)

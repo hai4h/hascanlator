@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtCore import Qt
 
 from src.ui.canvas.items import BoundingBoxItem
 
@@ -119,5 +120,29 @@ class ImageOperationsMixin:
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.valign = valign
+                if box.is_typeset:
+                    box.update_typeset()
+
+    def set_text_line_spacing(self, delta):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                # Round to 1 decimal place to prevent floating point errors (e.g. 1.1 + 0.1 = 1.200000000002)
+                box.line_spacing = max(0.5, round(box.line_spacing + delta, 1))
+                if box.is_typeset:
+                    box.update_typeset()
+
+    def reset_text_alignment(self):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.align = Qt.AlignCenter
+                box.valign = Qt.AlignVCenter
+                if box.is_typeset:
+                    box.update_typeset()
+
+    def reset_text_spacing(self):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.indent = 5
+                box.line_spacing = 1.0
                 if box.is_typeset:
                     box.update_typeset()
