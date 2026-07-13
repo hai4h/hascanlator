@@ -30,9 +30,17 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.text_item.hide()
         self.is_typeset = False
         self.align = Qt.AlignCenter
-        self.valign = Qt.AlignVCenter # Added vertical alignment
+        self.valign = Qt.AlignVCenter 
         self.indent = 5
         self.line_spacing = 1.0
+        
+        # Font Settings
+        self.font_family = "sans-serif"
+        self.font_size = 16
+        self.is_bold = True
+        self.is_italic = False
+        self.is_underline = False
+        self.is_strikeout = False
 
     def update_typeset(self):
         """Re-renders the text box to fit bounds and alignment."""
@@ -43,10 +51,16 @@ class BoundingBoxItem(QGraphicsRectItem):
         if self.align == Qt.AlignLeft: align_str = "left"
         elif self.align == Qt.AlignRight: align_str = "right"
         
-        text = self.translated_text.replace('\n', '<br>')
+        weight = "bold" if self.is_bold else "normal"
+        style = "italic" if self.is_italic else "normal"
         
-        # --- ADD line-height: {self.line_spacing} TO THE STYLE STRING ---
-        html = f"<div align='{align_str}' style='margin: {self.indent}px; line-height: {self.line_spacing}; color: black; font-family: sans-serif; font-size: 16px; font-weight: bold;'>{text}</div>"
+        decorations = []
+        if self.is_underline: decorations.append("underline")
+        if self.is_strikeout: decorations.append("line-through")
+        text_decor = " ".join(decorations) if decorations else "none"
+        
+        text = self.translated_text.replace('\n', '<br>')
+        html = f"<div align='{align_str}' style='margin: {self.indent}px; line-height: {self.line_spacing}; color: black; font-family: \"{self.font_family}\", sans-serif; font-size: {self.font_size}px; font-weight: {weight}; font-style: {style}; text-decoration: {text_decor};'>{text}</div>"
         
         self.text_item.setHtml(html)
 

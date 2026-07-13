@@ -1,31 +1,27 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMenu, 
-    QWidgetAction, QGridLayout, QToolButton, QLabel
+    QWidget, QBoxLayout, QPushButton, QMenu, 
+    QWidgetAction, QGridLayout, QToolButton, QLabel, QFontComboBox, QSpinBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 class TypesetToolBar(QWidget):
-    """Contextual vertical toolbar that appears next to the canvas for formatting."""
+    """Contextual toolbar that appears next to the canvas for formatting."""
+    
+    position_requested = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(50)
-        
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #2b2b2b;
-                border-left: 1px solid #3c3c3c;
-            }
-            QPushButton::menu-indicator { 
-                image: none; 
-                width: 0px;
-            }
-        """)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self._current_pos = "right"
+        self.positions = ["right", "bottom", "left", "top"]
         self._setup_ui()
+        self.set_position(self._current_pos)
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 10, 5, 10)
-        layout.setSpacing(10)
+        self.main_layout = QBoxLayout(QBoxLayout.TopToBottom, self)
+        self.main_layout.setContentsMargins(6, 6, 6, 6)
+        self.main_layout.setSpacing(10)
+        self.main_layout.setAlignment(Qt.AlignCenter) # <--- PERFECTLY CENTERS BUTTONS
 
         def create_btn(icon_text, tooltip):
             btn = QPushButton(icon_text)
@@ -38,7 +34,7 @@ class TypesetToolBar(QWidget):
                     border-radius: 4px;
                 }
             """)
-            layout.addWidget(btn)
+            self.main_layout.addWidget(btn)
             return btn
             
         def create_reset_btn(text):
@@ -57,13 +53,102 @@ class TypesetToolBar(QWidget):
             """)
             return btn
 
-        # --- Basic Tools ---
+        def create_menu_btn(icon_text, tooltip, auto_close=True, menu_ref=None):
+            btn = QToolButton()
+            btn.setText(icon_text)
+            btn.setToolTip(tooltip)
+            btn.setFixedSize(34, 34)
+            btn.setStyleSheet("""
+                QToolButton { font-size: 16px; font-weight: bold; border-radius: 4px; background: transparent; color: white; border: none; } 
+                QToolButton:hover { background: #555555; }
+            """)
+            if auto_close and menu_ref:
+                btn.clicked.connect(menu_ref.hide) 
+            return btn
+
+        self.btn_cycle_pos = create_btn("⟲", "Move Toolbar Position")
+        self.btn_cycle_pos.clicked.connect(self._cycle_position)
+        
         self.btn_clean_bubble = create_btn("⌫", "Smart Clean Bubble (Erase text)")
         self.btn_toggle_typeset = create_btn("⊙", "Toggle Typeset Visibility")
         
-        layout.addSpacing(10)
+        # ==========================================
+        # FONT MENU
+        # ==========================================
+        self.btn_font = create_btn("A", "Font Controls")
+        self.font_menu = QMenu(self)
+        self.font_menu.setStyleSheet("border: none;")
         
-        # --- Compact Alignment Menu ---
+        font_widget = QWidget()
+        font_widget.setStyleSheet("QWidget { background-color: #333333; border: 1px solid #555555; }")
+        font_layout = QGridLayout(font_widget)
+        font_layout.setContentsMargins(6, 6, 6, 6)
+        font_layout.setSpacing(6)
+        
+        # Row 0: Font Family Dropdown & Reload
+        self.font_combo = QFontComboBox()
+        self.font_combo.setStyleSheet("""
+            QFontComboBox { background: #444444; color: white; border: 1px solid #555555; padding: 2px; border-radius: 3px; }
+            QAbstractItemView { background: #444444; color: white; selection-background-color: #555555; }
+        """)
+        self.font_combo.setMinimumWidth(150)
+        self.btn_reload_fonts = create_menu_btn("⟳", "Reload Fonts", False)
+        
+        font_layout.addWidget(self.font_combo, 0, 0, 1, 3)
+        font_layout.addWidget(self.btn_reload_fonts, 0, 3)
+        
+        # Row 1: Open Fonts Folder
+        self.btn_open_fonts = create_reset_btn("Open Custom Fonts Folder")
+        font_layout.addWidget(self.btn_open_fonts, 1, 0, 1, 4)
+        
+        # Row 2: Font Size (with number input)
+        lbl_size = QLabel("Size")
+        lbl_size.setStyleSheet("color: white; border: none;")
+        
+        self.spin_size = QSpinBox()
+        self.spin_size.setRange(1, 999)
+        self.spin_size.setValue(16)
+        self.spin_size.setAlignment(Qt.AlignCenter)
+        self.spin_size.setStyleSheet("""
+            QSpinBox { background: #444444; color: white; border: 1px solid #555555; padding: 2px; border-radius: 3px; }
+            QSpinBox::up-button, QSpinBox::down-button { width: 0px; } /* hide default spin buttons */
+        """)
+        
+        self.btn_size_minus = create_menu_btn("-", "Decrease Font Size", False)
+        self.btn_size_plus = create_menu_btn("+", "Increase Font Size", False)
+        
+        font_layout.addWidget(lbl_size, 2, 0)
+        font_layout.addWidget(self.spin_size, 2, 1)
+        font_layout.addWidget(self.btn_size_minus, 2, 2)
+        font_layout.addWidget(self.btn_size_plus, 2, 3)
+        
+        # Row 3: Styling Buttons
+        self.btn_bold = create_menu_btn("B", "Toggle Bold", False)
+        self.btn_bold.setStyleSheet(self.btn_bold.styleSheet() + " font-weight: 900;")
+        self.btn_italic = create_menu_btn("I", "Toggle Italic", False)
+        self.btn_italic.setStyleSheet(self.btn_italic.styleSheet() + " font-style: italic; font-weight: normal;")
+        self.btn_underline = create_menu_btn("U", "Toggle Underline", False)
+        self.btn_underline.setStyleSheet(self.btn_underline.styleSheet() + " text-decoration: underline; font-weight: normal;")
+        self.btn_strike = create_menu_btn("S", "Toggle Strikeout", False)
+        self.btn_strike.setStyleSheet(self.btn_strike.styleSheet() + " text-decoration: line-through; font-weight: normal;")
+        
+        font_layout.addWidget(self.btn_bold, 3, 0)
+        font_layout.addWidget(self.btn_italic, 3, 1)
+        font_layout.addWidget(self.btn_underline, 3, 2)
+        font_layout.addWidget(self.btn_strike, 3, 3)
+        
+        # Row 4: Reset
+        self.btn_font_reset = create_reset_btn("Reset Font")
+        font_layout.addWidget(self.btn_font_reset, 4, 0, 1, 4)
+
+        font_action = QWidgetAction(self)
+        font_action.setDefaultWidget(font_widget)
+        self.font_menu.addAction(font_action)
+        self.btn_font.setMenu(self.font_menu)
+
+        # ==========================================
+        # ALIGNMENT MENU
+        # ==========================================
         self.btn_align = create_btn("≡", "Text Alignment")
         self.align_menu = QMenu(self)
         self.align_menu.setStyleSheet("border: none;")
@@ -74,23 +159,12 @@ class TypesetToolBar(QWidget):
         align_layout.setContentsMargins(6, 6, 6, 6)
         align_layout.setSpacing(6)
 
-        def create_menu_btn(icon_text, tooltip):
-            btn = QToolButton()
-            btn.setText(icon_text)
-            btn.setToolTip(tooltip)
-            btn.setFixedSize(34, 34)
-            btn.setStyleSheet("""
-                QToolButton { font-size: 16px; font-weight: bold; border-radius: 4px; background: transparent; color: white; border: none; } 
-                QToolButton:hover { background: #555555; }
-            """)
-            return btn
-
-        self.btn_align_left = create_menu_btn("|<", "Align Left")
-        self.btn_align_center = create_menu_btn("≡", "Align Center")
-        self.btn_align_right = create_menu_btn(">|", "Align Right")
-        self.btn_valign_top = create_menu_btn("⇡", "Align Top")
-        self.btn_valign_middle = create_menu_btn("⇕", "Align Middle")
-        self.btn_valign_bottom = create_menu_btn("⇣", "Align Bottom")
+        self.btn_align_left = create_menu_btn("|<", "Align Left", True, self.align_menu)
+        self.btn_align_center = create_menu_btn("≡", "Align Center", True, self.align_menu)
+        self.btn_align_right = create_menu_btn(">|", "Align Right", True, self.align_menu)
+        self.btn_valign_top = create_menu_btn("⇡", "Align Top", True, self.align_menu)
+        self.btn_valign_middle = create_menu_btn("⇕", "Align Middle", True, self.align_menu)
+        self.btn_valign_bottom = create_menu_btn("⇣", "Align Bottom", True, self.align_menu)
         
         self.btn_align_reset = create_reset_btn("Reset Alignment")
 
@@ -107,7 +181,9 @@ class TypesetToolBar(QWidget):
         self.align_menu.addAction(align_action)
         self.btn_align.setMenu(self.align_menu)
         
-        # --- Compact Spacing & Indent Menu ---
+        # ==========================================
+        # SPACING MENU
+        # ==========================================
         self.btn_spacing = create_btn("↕", "Spacing & Indent")
         self.spacing_menu = QMenu(self)
         self.spacing_menu.setStyleSheet("border: none;")
@@ -120,13 +196,13 @@ class TypesetToolBar(QWidget):
         
         lbl_line = QLabel("Line")
         lbl_line.setStyleSheet("color: white; border: none;")
-        self.btn_line_space_minus = create_menu_btn("-", "Decrease Line Spacing")
-        self.btn_line_space_plus = create_menu_btn("+", "Increase Line Spacing")
+        self.btn_line_space_minus = create_menu_btn("-", "Decrease Line Spacing", False)
+        self.btn_line_space_plus = create_menu_btn("+", "Increase Line Spacing", False)
         
         lbl_indent = QLabel("Indent")
         lbl_indent.setStyleSheet("color: white; border: none;")
-        self.btn_indent_minus = create_menu_btn("-", "Decrease Indent")
-        self.btn_indent_plus = create_menu_btn("+", "Increase Indent")
+        self.btn_indent_minus = create_menu_btn("-", "Decrease Indent", False)
+        self.btn_indent_plus = create_menu_btn("+", "Increase Indent", False)
         
         self.btn_spacing_reset = create_reset_btn("Reset Spacing")
 
@@ -142,5 +218,42 @@ class TypesetToolBar(QWidget):
         spacing_action.setDefaultWidget(spacing_widget)
         self.spacing_menu.addAction(spacing_action)
         self.btn_spacing.setMenu(self.spacing_menu)
+
+    def set_position(self, pos):
+        """Flips the toolbar's dimensions and flex-direction based on position."""
+        self._current_pos = pos
+        if pos in ["left", "right"]:
+            self.main_layout.setDirection(QBoxLayout.TopToBottom)
+            self.setMinimumWidth(50)
+            self.setMaximumWidth(50)
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)
+        else:
+            self.main_layout.setDirection(QBoxLayout.LeftToRight)
+            self.setMinimumHeight(50)
+            self.setMaximumHeight(50)
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
+
+        border_css = {
+            "right": "border-left: 1px solid #3c3c3c;",
+            "left": "border-right: 1px solid #3c3c3c;",
+            "top": "border-bottom: 1px solid #3c3c3c;",
+            "bottom": "border-top: 1px solid #3c3c3c;"
+        }
         
-        layout.addStretch()
+        self.setStyleSheet(f"""
+            TypesetToolBar {{
+                background-color: #2b2b2b;
+                {border_css[pos]}
+            }}
+            QPushButton::menu-indicator {{ 
+                image: none; 
+                width: 0px;
+            }}
+        """)
+        
+    def _cycle_position(self):
+        idx = self.positions.index(self._current_pos)
+        next_pos = self.positions[(idx + 1) % len(self.positions)]
+        self.position_requested.emit(next_pos)

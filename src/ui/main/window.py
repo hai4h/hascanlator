@@ -1,11 +1,12 @@
 import os
 import psutil
 
+from PySide6.QtGui import QPixmap, QFontDatabase, QDesktopServices, QFont
+from PySide6.QtCore import Qt, QRectF, Signal, QSettings, QTimer, QUrl
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QProgressBar, QLabel
+    QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QProgressBar, QLabel, QGridLayout
 )
-from PySide6.QtCore import Qt, QRectF, Signal, QSettings, QTimer
 
 from src.core.workspace import WorkspaceManager
 
@@ -80,20 +81,27 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         center_layout = QVBoxLayout(center_area)
         center_layout.setContentsMargins(0, 0, 0, 0)
         
-        # --- NEW CANVAS LAYOUT WITH CONTEXT TOOLBAR ---
-        canvas_layout = QHBoxLayout()
-        canvas_layout.setSpacing(0)
+        # --- DYNAMIC CANVAS LAYOUT ---
+        self.canvas_layout = QGridLayout()
+        self.canvas_layout.setSpacing(0)
+        self.canvas_layout.setContentsMargins(0, 0, 0, 0)
         
         self.scene = QGraphicsScene()
         self.view = MangaCanvasView(self.scene)
         
         self.typeset_toolbar = TypesetToolBar(self)
-        self.typeset_toolbar.setVisible(False) # Hidden by default
+        self.typeset_toolbar.setVisible(False) 
+        self.typeset_toolbar.position_requested.connect(self.set_typeset_toolbar_position)
         
-        canvas_layout.addWidget(self.view, stretch=1)
-        canvas_layout.addWidget(self.typeset_toolbar)
+        self.canvas_layout.addWidget(self.view, 1, 1)
+        self.canvas_layout.setRowStretch(1, 1)
+        self.canvas_layout.setColumnStretch(1, 1)
         
-        center_layout.addLayout(canvas_layout, stretch=1)
+        # Apply initial position from settings
+        initial_pos = self.settings.value("typeset_toolbar_pos", "right")
+        self.set_typeset_toolbar_position(initial_pos)
+        
+        center_layout.addLayout(self.canvas_layout, stretch=1)
         center_layout.addWidget(self.nav)
         
         main_layout.addWidget(self.toolbar)
@@ -148,7 +156,6 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.right_dock.btn_translate_box.clicked.connect(self.run_translation_on_selected)
         self.right_dock.btn_translate_all.clicked.connect(self.run_translation_on_all)
         
-        # --- BIND NEW CONTEXT TOOLBAR SIGNALS ---
         self.typeset_toolbar.btn_clean_bubble.clicked.connect(self.smart_clean_bubble)
         self.typeset_toolbar.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
         
@@ -166,6 +173,15 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.typeset_toolbar.btn_align_reset.clicked.connect(self.reset_text_alignment)
         self.typeset_toolbar.btn_spacing_reset.clicked.connect(self.reset_text_spacing)
 
+        self.typeset_toolbar.font_combo.currentFontChanged.connect(lambda f: self.set_text_font_family(f.family()))
+        self.typeset_toolbar.btn_size_plus.clicked.connect(lambda: self.set_text_font_size(1))
+        self.typeset_toolbar.btn_size_minus.clicked.connect(lambda: self.set_text_font_size(-1))
+        self.typeset_toolbar.btn_bold.clicked.connect(self.toggle_text_bold)
+        self.typeset_toolbar.btn_italic.clicked.connect(self.toggle_text_italic)
+        self.typeset_toolbar.btn_underline.clicked.connect(self.toggle_text_underline)
+        self.typeset_toolbar.btn_strike.clicked.connect(self.toggle_text_strikeout)
+        self.typeset_toolbar.btn_font_reset.clicked.connect(self.reset_text_font)
+
     def closeEvent(self, event):
         if self.scene:
             self.scene.selectionChanged.disconnect(self.on_selection_changed)
@@ -182,6 +198,21 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             title += f"   |   [{self.workspace.current_page_number}/{self.workspace.total_pages}] {self.workspace.current_filename}"
             
         self.setWindowTitle(title)
+
+    def set_typeset_toolbar_position(self, pos):
+        """Moves the contextual toolbar around the canvas."""
+        self.canvas_layout.removeWidget(self.typeset_toolbar)
+        self.typeset_toolbar.set_position(pos)
+        self.settings.setValue("typeset_toolbar_pos", pos)
+        
+        if pos == "left":
+            self.canvas_layout.addWidget(self.typeset_toolbar, 1, 0)
+        elif pos == "right":
+            self.canvas_layout.addWidget(self.typeset_toolbar, 1, 2)
+        elif pos == "top":
+            self.canvas_layout.addWidget(self.typeset_toolbar, 0, 1)
+        elif pos == "bottom":
+            self.canvas_layout.addWidget(self.typeset_toolbar, 2, 1)
 
     def update_button_states(self):
         has_image = self.workspace.has_images
@@ -285,10 +316,19 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box = BoundingBoxItem(b_data['rect'], is_auto=b_data['is_auto'])
                 box.setPos(b_data['pos'])
                 box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
+
                 box.align = b_data.get('align', Qt.AlignCenter)
                 box.valign = b_data.get('valign', Qt.AlignVCenter) 
                 box.indent = b_data.get('indent', 5)
                 box.line_spacing = b_data.get('line_spacing', 1.0)
+                
+                box.font_family = b_data.get('font_family', "sans-serif")
+                box.font_size = b_data.get('font_size', 16)
+                box.is_bold = b_data.get('is_bold', True)
+                box.is_italic = b_data.get('is_italic', False)
+                box.is_underline = b_data.get('is_underline', False)
+                box.is_strikeout = b_data.get('is_strikeout', False)
+                
                 self.scene.addItem(box)
                 
                 if b_data.get('is_typeset', False):
@@ -309,7 +349,14 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'align': getattr(item, 'align', Qt.AlignCenter),
             'valign': getattr(item, 'valign', Qt.AlignVCenter), 
             'indent': getattr(item, 'indent', 5),
-            'line_spacing': getattr(item, 'line_spacing', 1.0)
+            'line_spacing': getattr(item, 'line_spacing', 1.0),
+            'font_family': getattr(item, 'font_family', "sans-serif"),
+            'font_size': getattr(item, 'font_size', 16),
+            'is_bold': getattr(item, 'is_bold', True),
+            'is_italic': getattr(item, 'is_italic', False),
+            'is_underline': getattr(item, 'is_underline', False),
+            'is_strikeout': getattr(item, 'is_strikeout', False)
+            
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
         self.workspace.save_page_state(self.workspace.current_image_path, boxes)
 

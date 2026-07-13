@@ -146,3 +146,56 @@ class ImageOperationsMixin:
                 box.line_spacing = 1.0
                 if box.is_typeset:
                     box.update_typeset()
+
+    def set_text_font_family(self, family):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.font_family = family
+                if box.is_typeset: box.update_typeset()
+
+    def set_text_font_size(self, delta):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.font_size = max(1, box.font_size + delta)
+                if box.is_typeset: box.update_typeset()
+
+    def set_text_font_size_exact(self, size):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.font_size = max(1, size)
+                if box.is_typeset: box.update_typeset()
+
+    def toggle_text_bold(self):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.is_bold = not box.is_bold
+                if box.is_typeset: box.update_typeset()
+
+    def toggle_text_italic(self):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.is_italic = not box.is_italic
+                if box.is_typeset: box.update_typeset()
+
+    def toggle_text_underline(self):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.is_underline = not box.is_underline
+                if box.is_typeset: box.update_typeset()
+
+    def toggle_text_strikeout(self):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.is_strikeout = not box.is_strikeout
+                if box.is_typeset: box.update_typeset()
+
+    def reset_text_font(self):
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.font_family = "sans-serif"
+                box.font_size = 16
+                box.is_bold = True
+                box.is_italic = False
+                box.is_underline = False
+                box.is_strikeout = False
+                if box.is_typeset: box.update_typeset()
