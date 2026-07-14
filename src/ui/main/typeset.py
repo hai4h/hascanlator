@@ -1,8 +1,15 @@
 from PySide6.QtWidgets import (
     QWidget, QBoxLayout, QPushButton, QMenu, 
-    QWidgetAction, QGridLayout, QToolButton, QLabel, QFontComboBox, QSpinBox
+    QWidgetAction, QGridLayout, QToolButton, QLabel, QComboBox, QSpinBox, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal
+
+class MenuContainerWidget(QWidget):
+    """Custom widget to prevent clicks on empty grid spaces from accidentally closing the QMenu."""
+    def mousePressEvent(self, event):
+        event.accept()
+    def mouseReleaseEvent(self, event):
+        event.accept()
 
 class TypesetToolBar(QWidget):
     """Contextual toolbar that appears next to the canvas for formatting."""
@@ -21,7 +28,7 @@ class TypesetToolBar(QWidget):
         self.main_layout = QBoxLayout(QBoxLayout.TopToBottom, self)
         self.main_layout.setContentsMargins(6, 6, 6, 6)
         self.main_layout.setSpacing(10)
-        self.main_layout.setAlignment(Qt.AlignCenter) # <--- PERFECTLY CENTERS BUTTONS
+        self.main_layout.setAlignment(Qt.AlignCenter)
 
         def create_btn(icon_text, tooltip):
             btn = QPushButton(icon_text)
@@ -79,29 +86,31 @@ class TypesetToolBar(QWidget):
         self.font_menu = QMenu(self)
         self.font_menu.setStyleSheet("border: none;")
         
-        font_widget = QWidget()
+        font_widget = MenuContainerWidget()
         font_widget.setStyleSheet("QWidget { background-color: #333333; border: 1px solid #555555; }")
         font_layout = QGridLayout(font_widget)
         font_layout.setContentsMargins(6, 6, 6, 6)
         font_layout.setSpacing(6)
         
-        # Row 0: Font Family Dropdown & Reload
-        self.font_combo = QFontComboBox()
+        # Row 0: Font Family Custom Dropdown
+        self.font_combo = QComboBox()
         self.font_combo.setStyleSheet("""
-            QFontComboBox { background: #444444; color: white; border: 1px solid #555555; padding: 2px; border-radius: 3px; }
+            QComboBox { background: #444444; color: white; border: 1px solid #555555; padding: 2px; border-radius: 3px; }
             QAbstractItemView { background: #444444; color: white; selection-background-color: #555555; }
         """)
         self.font_combo.setMinimumWidth(150)
+        self.font_combo.setMaxVisibleItems(15)
+        
         self.btn_reload_fonts = create_menu_btn("⟳", "Reload Fonts", False)
         
         font_layout.addWidget(self.font_combo, 0, 0, 1, 3)
         font_layout.addWidget(self.btn_reload_fonts, 0, 3)
         
-        # Row 1: Open Fonts Folder
-        self.btn_open_fonts = create_reset_btn("Open Custom Fonts Folder")
+        # Row 1: Open Fonts Settings
+        self.btn_open_fonts = create_reset_btn("Customize Fonts")
         font_layout.addWidget(self.btn_open_fonts, 1, 0, 1, 4)
         
-        # Row 2: Font Size (with number input)
+        # Row 2: Font Size
         lbl_size = QLabel("Size")
         lbl_size.setStyleSheet("color: white; border: none;")
         
@@ -111,7 +120,7 @@ class TypesetToolBar(QWidget):
         self.spin_size.setAlignment(Qt.AlignCenter)
         self.spin_size.setStyleSheet("""
             QSpinBox { background: #444444; color: white; border: 1px solid #555555; padding: 2px; border-radius: 3px; }
-            QSpinBox::up-button, QSpinBox::down-button { width: 0px; } /* hide default spin buttons */
+            QSpinBox::up-button, QSpinBox::down-button { width: 0px; }
         """)
         
         self.btn_size_minus = create_menu_btn("-", "Decrease Font Size", False)
@@ -137,7 +146,6 @@ class TypesetToolBar(QWidget):
         font_layout.addWidget(self.btn_underline, 3, 2)
         font_layout.addWidget(self.btn_strike, 3, 3)
         
-        # Row 4: Reset
         self.btn_font_reset = create_reset_btn("Reset Font")
         font_layout.addWidget(self.btn_font_reset, 4, 0, 1, 4)
 
@@ -153,7 +161,7 @@ class TypesetToolBar(QWidget):
         self.align_menu = QMenu(self)
         self.align_menu.setStyleSheet("border: none;")
         
-        align_widget = QWidget()
+        align_widget = MenuContainerWidget()
         align_widget.setStyleSheet("QWidget { background-color: #333333; border: 1px solid #555555; }")
         align_layout = QGridLayout(align_widget)
         align_layout.setContentsMargins(6, 6, 6, 6)
@@ -188,7 +196,7 @@ class TypesetToolBar(QWidget):
         self.spacing_menu = QMenu(self)
         self.spacing_menu.setStyleSheet("border: none;")
         
-        spacing_widget = QWidget()
+        spacing_widget = MenuContainerWidget()
         spacing_widget.setStyleSheet("QWidget { background-color: #333333; border: 1px solid #555555; }")
         spacing_layout = QGridLayout(spacing_widget)
         spacing_layout.setContentsMargins(6, 6, 6, 6)
@@ -228,12 +236,14 @@ class TypesetToolBar(QWidget):
             self.setMaximumWidth(50)
             self.setMinimumHeight(0)
             self.setMaximumHeight(16777215)
+            self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding) # Ensures layout snaps to it
         else:
             self.main_layout.setDirection(QBoxLayout.LeftToRight)
             self.setMinimumHeight(50)
             self.setMaximumHeight(50)
             self.setMinimumWidth(0)
             self.setMaximumWidth(16777215)
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed) # Ensures layout snaps to it
 
         border_css = {
             "right": "border-left: 1px solid #3c3c3c;",

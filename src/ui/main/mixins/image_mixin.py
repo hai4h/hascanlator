@@ -152,12 +152,22 @@ class ImageOperationsMixin:
             if isinstance(box, BoundingBoxItem):
                 box.font_family = family
                 if box.is_typeset: box.update_typeset()
+                
+        # Maintain list of recent fonts
+        if hasattr(self, 'recent_fonts'):
+            if family in self.recent_fonts:
+                self.recent_fonts.remove(family)
+            self.recent_fonts.insert(0, family)
+            if len(self.recent_fonts) > 5:
+                self.recent_fonts = self.recent_fonts[:5]
+                
+        self.refresh_font_combo(current_font=family)
 
-    def set_text_font_size(self, delta):
-        for box in self.scene.selectedItems():
-            if isinstance(box, BoundingBoxItem):
-                box.font_size = max(1, box.font_size + delta)
-                if box.is_typeset: box.update_typeset()
+    # def set_text_font_size(self, delta):
+    #     for box in self.scene.selectedItems():
+    #         if isinstance(box, BoundingBoxItem):
+    #             box.font_size = max(1, box.font_size + delta)
+    #             if box.is_typeset: box.update_typeset()
 
     def set_text_font_size_exact(self, size):
         for box in self.scene.selectedItems():
@@ -194,7 +204,7 @@ class ImageOperationsMixin:
             if isinstance(box, BoundingBoxItem):
                 box.font_family = "sans-serif"
                 box.font_size = 16
-                box.is_bold = True
+                box.is_bold = False
                 box.is_italic = False
                 box.is_underline = False
                 box.is_strikeout = False

@@ -1,9 +1,11 @@
 from PySide6.QtWidgets import QGraphicsView
 from PySide6.QtGui import QPainter
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from src.ui.canvas.items import BoundingBoxItem
 
 class MangaCanvasView(QGraphicsView):
+    resized = Signal() # Added signal to broadcast size changes
+
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
@@ -11,6 +13,11 @@ class MangaCanvasView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
         self._is_panning = False
+
+    def resizeEvent(self, event):
+        """Emit a signal when the canvas resizes so overlays can snap to edges."""
+        super().resizeEvent(event)
+        self.resized.emit()
 
     def wheelEvent(self, event):
         if event.modifiers() == Qt.ControlModifier:

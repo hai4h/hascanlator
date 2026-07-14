@@ -1,11 +1,11 @@
 import os
 import psutil
 
-from PySide6.QtGui import QPixmap, QFontDatabase, QDesktopServices, QFont
+from PySide6.QtGui import QPixmap, QFontDatabase, QDesktopServices, QFont, QColor
 from PySide6.QtCore import Qt, QRectF, Signal, QSettings, QTimer, QUrl
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QProgressBar, QLabel, QGridLayout
+    QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QProgressBar, QLabel
 )
 
 from src.core.workspace import WorkspaceManager
@@ -52,6 +52,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.detect_worker = None
         self.translation_worker = None
 
+        self.recent_fonts = []
+        self.external_fonts = []
+
         self._setup_ui()
         self._connect_signals()
         
@@ -64,6 +67,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.load_model("yolo_detector")
         if self.settings.value("auto_load_nmt", False, type=bool):
             self.load_model("nmt_translator")
+
+        # Load local fonts on boot
+        self.reload_custom_fonts()
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -80,29 +86,25 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         center_area = QWidget()
         center_layout = QVBoxLayout(center_area)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # --- DYNAMIC CANVAS LAYOUT ---
-        self.canvas_layout = QGridLayout()
-        self.canvas_layout.setSpacing(0)
-        self.canvas_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(0)
         
         self.scene = QGraphicsScene()
         self.view = MangaCanvasView(self.scene)
         
-        self.typeset_toolbar = TypesetToolBar(self)
+        # Parent the toolbar directly to the view so it acts as an overlay layer ON TOP of the canvas
+        self.typeset_toolbar = TypesetToolBar(self.view) 
         self.typeset_toolbar.setVisible(False) 
         self.typeset_toolbar.position_requested.connect(self.set_typeset_toolbar_position)
         
-        self.canvas_layout.addWidget(self.view, 1, 1)
-        self.canvas_layout.setRowStretch(1, 1)
-        self.canvas_layout.setColumnStretch(1, 1)
+        # Connect the canvas resize event so the overlay sticks tightly to the edges
+        self.view.resized.connect(self.update_toolbar_geometry)
+        
+        center_layout.addWidget(self.view, stretch=1)
+        center_layout.addWidget(self.nav)
         
         # Apply initial position from settings
         initial_pos = self.settings.value("typeset_toolbar_pos", "right")
         self.set_typeset_toolbar_position(initial_pos)
-        
-        center_layout.addLayout(self.canvas_layout, stretch=1)
-        center_layout.addWidget(self.nav)
         
         main_layout.addWidget(self.toolbar)
         main_layout.addWidget(center_area, stretch=1) 
@@ -156,9 +158,11 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.right_dock.btn_translate_box.clicked.connect(self.run_translation_on_selected)
         self.right_dock.btn_translate_all.clicked.connect(self.run_translation_on_all)
         
+        # --- TYPESET SIGNALS ---
         self.typeset_toolbar.btn_clean_bubble.clicked.connect(self.smart_clean_bubble)
         self.typeset_toolbar.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
         
+        # --- TEXT ALIGN SIGNALS ---
         self.typeset_toolbar.btn_align_left.clicked.connect(lambda: self.set_text_alignment(Qt.AlignLeft))
         self.typeset_toolbar.btn_align_center.clicked.connect(lambda: self.set_text_alignment(Qt.AlignCenter))
         self.typeset_toolbar.btn_align_right.clicked.connect(lambda: self.set_text_alignment(Qt.AlignRight))
@@ -166,6 +170,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.typeset_toolbar.btn_valign_middle.clicked.connect(lambda: self.set_text_valignment(Qt.AlignVCenter))
         self.typeset_toolbar.btn_valign_bottom.clicked.connect(lambda: self.set_text_valignment(Qt.AlignBottom))
         
+        # --- TEXT INDENT SIGNALS ---
         self.typeset_toolbar.btn_indent_plus.clicked.connect(lambda: self.set_text_indent(5))
         self.typeset_toolbar.btn_indent_minus.clicked.connect(lambda: self.set_text_indent(-5))
         self.typeset_toolbar.btn_line_space_plus.clicked.connect(lambda: self.set_text_line_spacing(0.1))
@@ -173,9 +178,20 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.typeset_toolbar.btn_align_reset.clicked.connect(self.reset_text_alignment)
         self.typeset_toolbar.btn_spacing_reset.clicked.connect(self.reset_text_spacing)
 
-        self.typeset_toolbar.font_combo.currentFontChanged.connect(lambda f: self.set_text_font_family(f.family()))
-        self.typeset_toolbar.btn_size_plus.clicked.connect(lambda: self.set_text_font_size(1))
-        self.typeset_toolbar.btn_size_minus.clicked.connect(lambda: self.set_text_font_size(-1))
+        # --- FONT SIGNALS ---
+        self.typeset_toolbar.btn_reload_fonts.clicked.connect(self.reload_custom_fonts)
+        self.typeset_toolbar.btn_open_fonts.clicked.connect(lambda: self.open_settings(tab_index=2))
+        self.typeset_toolbar.font_combo.currentIndexChanged.connect(self._on_font_combo_changed)
+        
+        self.typeset_toolbar.spin_size.valueChanged.connect(self.set_text_font_size_exact)
+        
+        self.typeset_toolbar.btn_size_plus.clicked.connect(
+            lambda: self.typeset_toolbar.spin_size.setValue(self.typeset_toolbar.spin_size.value() + 1)
+        )
+        self.typeset_toolbar.btn_size_minus.clicked.connect(
+            lambda: self.typeset_toolbar.spin_size.setValue(self.typeset_toolbar.spin_size.value() - 1)
+        )
+        
         self.typeset_toolbar.btn_bold.clicked.connect(self.toggle_text_bold)
         self.typeset_toolbar.btn_italic.clicked.connect(self.toggle_text_italic)
         self.typeset_toolbar.btn_underline.clicked.connect(self.toggle_text_underline)
@@ -200,19 +216,28 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.setWindowTitle(title)
 
     def set_typeset_toolbar_position(self, pos):
-        """Moves the contextual toolbar around the canvas."""
-        self.canvas_layout.removeWidget(self.typeset_toolbar)
+        """Updates the orientation and triggers a geometry update."""
         self.typeset_toolbar.set_position(pos)
         self.settings.setValue("typeset_toolbar_pos", pos)
+        self.update_toolbar_geometry()
         
+    def update_toolbar_geometry(self):
+        """Pins the overlay toolbar to the exact inner edges of the canvas view."""
+        if not hasattr(self, 'typeset_toolbar') or not self.view: return
+        
+        pos = self.settings.value("typeset_toolbar_pos", "right")
+        vw = self.view.width()
+        vh = self.view.height()
+        
+        # Calculate absolute pixel coordinates for the overlay relative to the canvas inner walls
         if pos == "left":
-            self.canvas_layout.addWidget(self.typeset_toolbar, 1, 0)
+            self.typeset_toolbar.setGeometry(0, 0, 50, vh)
         elif pos == "right":
-            self.canvas_layout.addWidget(self.typeset_toolbar, 1, 2)
+            self.typeset_toolbar.setGeometry(vw - 50, 0, 50, vh)
         elif pos == "top":
-            self.canvas_layout.addWidget(self.typeset_toolbar, 0, 1)
+            self.typeset_toolbar.setGeometry(0, 0, vw, 50)
         elif pos == "bottom":
-            self.canvas_layout.addWidget(self.typeset_toolbar, 2, 1)
+            self.typeset_toolbar.setGeometry(0, vh - 50, vw, 50)
 
     def update_button_states(self):
         has_image = self.workspace.has_images
@@ -324,7 +349,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 
                 box.font_family = b_data.get('font_family', "sans-serif")
                 box.font_size = b_data.get('font_size', 16)
-                box.is_bold = b_data.get('is_bold', True)
+                box.is_bold = b_data.get('is_bold', False)
                 box.is_italic = b_data.get('is_italic', False)
                 box.is_underline = b_data.get('is_underline', False)
                 box.is_strikeout = b_data.get('is_strikeout', False)
@@ -352,7 +377,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'line_spacing': getattr(item, 'line_spacing', 1.0),
             'font_family': getattr(item, 'font_family', "sans-serif"),
             'font_size': getattr(item, 'font_size', 16),
-            'is_bold': getattr(item, 'is_bold', True),
+            'is_bold': getattr(item, 'is_bold', False),
             'is_italic': getattr(item, 'is_italic', False),
             'is_underline': getattr(item, 'is_underline', False),
             'is_strikeout': getattr(item, 'is_strikeout', False)
@@ -385,6 +410,14 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             dock.trans_input.setEnabled(True)
             dock.ocr_input.setPlainText(self.current_selected_box.raw_text)
             dock.trans_input.setPlainText(self.current_selected_box.translated_text)
+            
+            # --- SYNC FONT UI ---
+            self.refresh_font_combo(self.current_selected_box.font_family)
+            
+            self.typeset_toolbar.spin_size.blockSignals(True)
+            self.typeset_toolbar.spin_size.setValue(self.current_selected_box.font_size)
+            self.typeset_toolbar.spin_size.blockSignals(False)
+            
             self._updating_ui = False 
         else:
             self.current_selected_box = None
@@ -427,3 +460,85 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         for item in self.scene.selectedItems():
             if isinstance(item, BoundingBoxItem):
                 self.scene.removeItem(item)
+
+    # --- FONT MANAGEMENT ---
+    def open_settings(self, tab_index=0):
+        dialog = SettingsDialog(self)
+        dialog.tabs.setCurrentIndex(tab_index)
+        dialog.exec()
+
+    def reload_custom_fonts(self):
+        fonts_dir = os.path.join(os.getcwd(), "fonts")
+        os.makedirs(fonts_dir, exist_ok=True)
+        
+        self.external_fonts = []
+        loaded = 0
+        
+        # Traverse all directories and subdirectories inside /fonts
+        for root, _, files in os.walk(fonts_dir):
+            for filename in files:
+                if filename.lower().endswith(('.ttf', '.otf', '.woff', '.woff2')):
+                    font_path = os.path.join(root, filename)
+                    font_id = QFontDatabase.addApplicationFont(font_path)
+                    if font_id != -1:
+                        families = QFontDatabase.applicationFontFamilies(font_id)
+                        for family in families:
+                            if family not in self.external_fonts:
+                                self.external_fonts.append(family)
+                        loaded += 1
+                        
+        if loaded > 0:
+            self.statusBar().showMessage(f"Loaded {loaded} custom font(s) from local folders.")
+        self.refresh_font_combo()
+
+    def refresh_font_combo(self, current_font=None):
+        """Builds a custom hierarchical font list: Current -> Recent -> External -> All"""
+        combo = self.typeset_toolbar.font_combo
+        combo.blockSignals(True)
+        combo.clear()
+
+        all_fonts = QFontDatabase.families()
+
+        def add_header(text):
+            combo.addItem(text)
+            idx = combo.count() - 1
+            model = combo.model()
+            item = model.item(idx)
+            if item:
+                item.setEnabled(False)
+                item.setBackground(QColor("#333333"))
+                item.setForeground(QColor("#aaaaaa"))
+                f = item.font()
+                f.setBold(True)
+                item.setFont(f)
+
+        def add_font_item(family):
+            combo.addItem(family)
+            idx = combo.count() - 1
+            combo.setItemData(idx, family, Qt.UserRole) 
+            combo.setItemData(idx, QFont(family), Qt.FontRole) 
+
+        if current_font:
+            add_header("--- CURRENT ---")
+            add_font_item(current_font)
+
+        if self.recent_fonts:
+            add_header("--- RECENT ---")
+            for f in self.recent_fonts: add_font_item(f)
+
+        if self.external_fonts:
+            add_header("--- EXTERNAL ---")
+            for f in self.external_fonts: add_font_item(f)
+
+        add_header("--- ALL FONTS ---")
+        for f in all_fonts: add_font_item(f)
+
+        if current_font:
+            combo.setCurrentIndex(1) 
+            
+        combo.blockSignals(False)
+
+    def _on_font_combo_changed(self, index):
+        family = self.typeset_toolbar.font_combo.itemData(index, Qt.UserRole)
+        if family: 
+            self.set_text_font_family(family)

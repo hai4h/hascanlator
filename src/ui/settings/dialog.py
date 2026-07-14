@@ -1,21 +1,23 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 
-    QPushButton, QTabWidget, QCheckBox, QMessageBox, QComboBox, QStackedWidget
+    QPushButton, QTabWidget, QCheckBox, QMessageBox, QComboBox, QStackedWidget, QListWidget
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QFont, QDesktopServices
 from huggingface_hub import scan_cache_dir
+import os
 
 class SettingsDialog(QDialog):
     def __init__(self, main_window):
         super().__init__(main_window)
         self.main_window = main_window
         self.setWindowTitle("Settings & Model Manager")
-        self.resize(600, 500)
+        self.resize(650, 550)
         
         self.main_window.model_status_changed.connect(self.update_ui_state)
         
         layout = QVBoxLayout(self)
-        tabs = QTabWidget()
+        self.tabs = QTabWidget()
         
         # ==========================================
         # TAB 1: VISION MODELS
@@ -95,7 +97,6 @@ class SettingsDialog(QDialog):
         trans_tab = QWidget()
         trans_layout = QVBoxLayout(trans_tab)
         
-        # --- Engine Selector ---
         engine_layout = QHBoxLayout()
         engine_layout.addWidget(QLabel("<b>Translation Method:</b>"))
         self.engine_combo = QComboBox()
@@ -109,10 +110,8 @@ class SettingsDialog(QDialog):
         trans_layout.addLayout(engine_layout)
         trans_layout.addWidget(QLabel("<hr>"))
         
-        # --- Stacked Widget for Options ---
         self.trans_stack = QStackedWidget()
         
-        # 1. Online Page (Google)
         online_page = QWidget()
         online_layout = QVBoxLayout(online_page)
         
@@ -120,7 +119,7 @@ class SettingsDialog(QDialog):
         api_layout.addWidget(QLabel("API Provider:"))
         api_combo = QComboBox()
         api_combo.addItems(["Google Translate"])
-        api_combo.setEnabled(False) # Only Google available right now
+        api_combo.setEnabled(False) 
         api_layout.addWidget(api_combo)
         online_layout.addLayout(api_layout)
         
@@ -130,7 +129,6 @@ class SettingsDialog(QDialog):
         lang_layout.addWidget(QLabel("Target Language:"))
         self.tgt_combo = QComboBox()
         
-        # Language Dictionaries (Mapped to deep-translator codes)
         self.langs_src = {"Auto Detect": "auto", "Japanese": "ja", "English": "en", "Korean": "ko", "Chinese (Simplified)": "zh-CN", "Vietnamese": "vi", "Spanish": "es", "French": "fr"}
         self.langs_tgt = {"English": "en", "Vietnamese": "vi", "Spanish": "es", "French": "fr", "Japanese": "ja", "Korean": "ko", "Chinese (Simplified)": "zh-CN"}
         
@@ -155,7 +153,6 @@ class SettingsDialog(QDialog):
         online_layout.addStretch()
         self.trans_stack.addWidget(online_page)
         
-        # 2. Local NMT Page
         nmt_page = QWidget()
         nmt_layout = QVBoxLayout(nmt_page)
         
@@ -163,7 +160,6 @@ class SettingsDialog(QDialog):
         nmt_info_layout.addWidget(QLabel("Model Provider:"))
         self.nmt_mod_combo = QComboBox()
         
-        # Adding Multilingual NLLB as an option
         nmt_repos = ["Helsinki-NLP/opus-mt-ja-en", "facebook/nllb-200-distilled-600M"]
         self.nmt_mod_combo.addItems(nmt_repos)
         
@@ -203,22 +199,74 @@ class SettingsDialog(QDialog):
         self.trans_stack.setCurrentIndex(0 if current_engine == "google" else 1)
         
         self._update_nmt_lang_states()
+
+        # ==========================================
+        # TAB 3: FONTS SETTINGS
+        # ==========================================
+        fonts_tab = QWidget()
+        fonts_layout = QVBoxLayout(fonts_tab)
+        
+        fonts_info = QLabel("<b>Custom Fonts</b><br>Drop .ttf or .otf files into the local fonts folder to use them in the app.")
+        fonts_layout.addWidget(fonts_info)
+        
+        h_layout = QHBoxLayout()
+        self.font_list = QListWidget()
+        for font in self.main_window.external_fonts:
+            self.font_list.addItem(font)
+        self.font_list.currentTextChanged.connect(self._update_font_preview)
+        
+        self.font_preview = QLabel("The quick brown fox jumps over the lazy dog\n0123456789")
+        self.font_preview.setAlignment(Qt.AlignCenter)
+        self.font_preview.setStyleSheet("background-color: #333; border: 1px solid #555; border-radius: 4px; padding: 10px; font-size: 24px;")
+        self.font_preview.setMinimumWidth(250)
+        self.font_preview.setWordWrap(True)
+        
+        h_layout.addWidget(self.font_list)
+        h_layout.addWidget(self.font_preview)
+        fonts_layout.addLayout(h_layout)
+        
+        btn_fonts_layout = QHBoxLayout()
+        btn_open_folder = QPushButton("Open Fonts Folder")
+        btn_open_folder.clicked.connect(self._open_fonts_folder)
+        btn_reload = QPushButton("Reload Fonts")
+        btn_reload.clicked.connect(self._reload_fonts_from_settings)
+        
+        btn_fonts_layout.addWidget(btn_open_folder)
+        btn_fonts_layout.addWidget(btn_reload)
+        fonts_layout.addLayout(btn_fonts_layout)
         
         # --- COMPILE TABS ---
-        tabs.addTab(models_tab, "Detection")
-        tabs.addTab(trans_tab, "Translation")
-        layout.addWidget(tabs)
+        self.tabs.addTab(models_tab, "Detection")
+        self.tabs.addTab(trans_tab, "Translation")
+        self.tabs.addTab(fonts_tab, "Fonts")
+        layout.addWidget(self.tabs)
         
         self.update_ui_state() 
 
     def closeEvent(self, event):
-        """Safely disconnect signals when the settings dialog is closed to prevent C++ object deletion crashes."""
         try:
             self.main_window.model_status_changed.disconnect(self.update_ui_state)
         except Exception:
             pass
         super().closeEvent(event)
 
+    # --- FONT SETTING HELPERS ---
+    def _update_font_preview(self, font_family):
+        if font_family:
+            self.font_preview.setFont(QFont(font_family, 24))
+
+    def _open_fonts_folder(self):
+        fonts_dir = os.path.join(os.getcwd(), "fonts")
+        os.makedirs(fonts_dir, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(fonts_dir))
+
+    def _reload_fonts_from_settings(self):
+        self.main_window.reload_custom_fonts()
+        self.font_list.clear()
+        for font in self.main_window.external_fonts:
+            self.font_list.addItem(font)
+
+    # --- MODEL & TRANSLATION SETTING HELPERS ---
     def _on_engine_changed(self, index):
         engine = "google" if index == 0 else "nmt"
         self.main_window.settings.setValue("translation_engine", engine)
@@ -228,16 +276,12 @@ class SettingsDialog(QDialog):
     def _on_nmt_repo_changed(self, index):
         new_repo = "facebook/nllb-200-distilled-600M" if index == 1 else "Helsinki-NLP/opus-mt-ja-en"
         old_repo = self.main_window.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
-        
         if new_repo != old_repo:
             self.main_window.settings.setValue("nmt_model_repo", new_repo)
             self._update_nmt_lang_states()
-            
-            # If an NMT model is currently loaded (or loading), automatically swap it out
             if self.main_window.nmt_model is not None or self.main_window.nmt_is_loading:
                 self.main_window.unload_model("nmt_translator")
                 self.main_window.load_model("nmt_translator")
-                
             self.update_ui_state()
 
     def _update_nmt_lang_states(self):
@@ -258,7 +302,6 @@ class SettingsDialog(QDialog):
         tgt_code = list(self.langs_tgt.values())[self.nmt_tgt.currentIndex()]
         self.main_window.settings.setValue("trans_src", src_code)
         self.main_window.settings.setValue("trans_tgt", tgt_code)
-        
         self.src_combo.blockSignals(True)
         self.tgt_combo.blockSignals(True)
         self.src_combo.setCurrentIndex(self.nmt_src.currentIndex())
@@ -271,7 +314,6 @@ class SettingsDialog(QDialog):
         tgt_code = list(self.langs_tgt.values())[self.tgt_combo.currentIndex()]
         self.main_window.settings.setValue("trans_src", src_code)
         self.main_window.settings.setValue("trans_tgt", tgt_code)
-        
         self.nmt_src.blockSignals(True)
         self.nmt_tgt.blockSignals(True)
         self.nmt_src.setCurrentIndex(self.src_combo.currentIndex())
@@ -323,14 +365,12 @@ class SettingsDialog(QDialog):
 
     def _apply_state(self, is_loaded, is_loading, is_queued, w_dict):
         is_downloaded = self.is_model_downloaded(w_dict["get_repo_id"]())
-        
         w_dict["chk_auto"].setEnabled(is_downloaded)
         if not is_downloaded:
             w_dict["chk_auto"].blockSignals(True)
             w_dict["chk_auto"].setChecked(False)
             w_dict["chk_auto"].blockSignals(False)
             self.main_window.settings.setValue(w_dict["setting_key"], False)
-            
             w_dict["disk_lbl"].setText("<font color='grey'><b>[Not Downloaded]</b></font>")
             w_dict["btn_delete"].setEnabled(False)
             w_dict["btn_load"].setText("Download && Load")
@@ -377,4 +417,5 @@ class SettingsDialog(QDialog):
             nmt_queued = "nmt_translator" in q
             self._apply_state(nmt_loaded, nmt_loading, nmt_queued, self.model_widgets["nmt_translator"])
         except RuntimeError:
-            pass # Ignore if the C++ UI object has already been deleted during close
+            pass
+        

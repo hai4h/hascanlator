@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsTextItem
-from PySide6.QtGui import QPen, QColor, QFont
+from PySide6.QtGui import QPen, QColor, QFont, QPainterPath
 from PySide6.QtCore import Qt
 
 class BoundingBoxItem(QGraphicsRectItem):
@@ -18,7 +18,8 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.brush_selected = QColor(0, 255, 0, 40)
         self.brush_normal = QColor(0, 0, 0, 0)
         self.setBrush(self.brush_normal)
-        self.handle_size = 8 
+        
+        self.handle_size = 12 
         self.current_handle = self.NONE
         self.resizing_handle = self.NONE
         
@@ -28,6 +29,11 @@ class BoundingBoxItem(QGraphicsRectItem):
         # --- Typesetting Variables ---
         self.text_item = QGraphicsTextItem(self)
         self.text_item.hide()
+        
+        self.text_item.setAcceptedMouseButtons(Qt.NoButton)
+        self.text_item.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.text_item.setZValue(-1)
+        
         self.is_typeset = False
         self.align = Qt.AlignCenter
         self.valign = Qt.AlignVCenter 
@@ -37,13 +43,23 @@ class BoundingBoxItem(QGraphicsRectItem):
         # Font Settings
         self.font_family = "sans-serif"
         self.font_size = 16
-        self.is_bold = True
+        self.is_bold = False
         self.is_italic = False
         self.is_underline = False
         self.is_strikeout = False
 
+    def boundingRect(self):
+        """Expand the invisible hit-box so we can grab the edges from the outside."""
+        margin = float(self.handle_size)
+        return self.rect().adjusted(-margin, -margin, margin, margin)
+
+    def shape(self):
+        """Register the expanded hit-box for mouse hover events."""
+        path = QPainterPath()
+        path.addRect(self.boundingRect())
+        return path
+
     def update_typeset(self):
-        """Re-renders the text box to fit bounds and alignment."""
         r = self.rect()
         self.text_item.setTextWidth(r.width())
         
@@ -67,12 +83,9 @@ class BoundingBoxItem(QGraphicsRectItem):
         text_h = self.text_item.boundingRect().height()
         box_h = r.height()
         
-        if self.valign == Qt.AlignTop:
-            y_pos = r.top()
-        elif self.valign == Qt.AlignBottom:
-            y_pos = r.bottom() - text_h
-        else: 
-            y_pos = r.top() + (box_h - text_h) / 2.0
+        if self.valign == Qt.AlignTop: y_pos = r.top()
+        elif self.valign == Qt.AlignBottom: y_pos = r.bottom() - text_h
+        else: y_pos = r.top() + (box_h - text_h) / 2.0
             
         self.text_item.setPos(r.left(), y_pos)
 
@@ -82,7 +95,7 @@ class BoundingBoxItem(QGraphicsRectItem):
         
         if self.is_typeset:
             self.update_typeset()
-            self.setBrush(Qt.transparent)
+            self.setBrush(QColor(255, 255, 255, 1))
             if self.isSelected():
                 self.setPen(QPen(QColor(100, 100, 255), 1, Qt.DashLine))
             else:
@@ -100,7 +113,7 @@ class BoundingBoxItem(QGraphicsRectItem):
                     self.setPen(QPen(QColor(100, 100, 255), 1, Qt.DashLine))
                 else:
                     self.setPen(QPen(Qt.transparent))
-                self.setBrush(Qt.transparent)
+                self.setBrush(QColor(255, 255, 255, 1)) 
             else:
                 self.setBrush(self.brush_selected if self.isSelected() else self.brush_normal)
                 pen = QPen(QColor(255, 100, 100) if self.isSelected() else QColor(0, 255, 0), 2)
@@ -109,9 +122,19 @@ class BoundingBoxItem(QGraphicsRectItem):
         return super().itemChange(change, value)
 
     def get_handle_at(self, pos):
-        r, x, y = self.rect(), pos.x(), pos.y()
-        l, rt = abs(x - r.left()) <= self.handle_size, abs(x - r.right()) <= self.handle_size
-        t, b = abs(y - r.top()) <= self.handle_size, abs(y - r.bottom()) <= self.handle_size
+        r = self.rect()
+        x, y = pos.x(), pos.y()
+        
+        # Prevent handle overlap on tiny boxes by limiting the INSIDE grab area, 
+        # but keep the OUTSIDE grab area large (self.handle_size)
+        in_x = min(self.handle_size, r.width() / 3.0)
+        in_y = min(self.handle_size, r.height() / 3.0)
+        out = self.handle_size
+        
+        l = (r.left() - out <= x <= r.left() + in_x)
+        rt = (r.right() - in_x <= x <= r.right() + out)
+        t = (r.top() - out <= y <= r.top() + in_y)
+        b = (r.bottom() - in_y <= y <= r.bottom() + out)
         
         if t and l: return self.TOP_LEFT
         if t and rt: return self.TOP_RIGHT
