@@ -20,9 +20,9 @@ from src.ui.main.toolbar import MainToolbar
 from src.ui.main.navigation import BottomNavigation
 from src.ui.main.typeset import TypesetToolBar
 
-from src.ui.main.mixins.image_mixin import ImageOperationsMixin
-from src.ui.main.mixins.model_mixin import ModelManagementMixin
-from src.ui.main.mixins.processing_mixin import WorkerProcessingMixin
+from src.ui.main.mixins.image import ImageOperationsMixin
+from src.ui.main.mixins.model import ModelManagementMixin
+from src.ui.main.mixins.processing import WorkerProcessingMixin
 
 class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin, WorkerProcessingMixin):
     model_status_changed = Signal()
@@ -32,7 +32,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.setWindowTitle("HAScanlator")
         self.resize(1300, 800)
         
-        self.settings = QSettings("HAScanlatorTeam", "HAScanlator")
+        config_path = os.path.join(os.getcwd(), "config.ini")
+        self.settings = QSettings(config_path, QSettings.IniFormat)
+        # populate config.ini with all defaults immediately
+        self._initialize_config_defaults()
         self.workspace = WorkspaceManager()
         
         self.current_image_item = None
@@ -70,6 +73,32 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         # Load local fonts on boot
         self.reload_custom_fonts()
+
+    def _initialize_config_defaults(self):
+        """Populates config.ini with all default settings so they are visible and editable by the user."""
+        defaults = {
+            "auto_load_mocr": False,
+            "auto_load_yolo": False,
+            "auto_load_nmt": False,
+            "auto_process": False,  # Auto-Scan in UI
+            "translation_engine": "google",
+            "nmt_model_repo": "Helsinki-NLP/opus-mt-ja-en",
+            "trans_src": "ja",
+            "trans_tgt": "en",
+            "default_font_family": "sans-serif",
+            "default_font_size": 16,
+            "default_font_bold": False,
+            "default_font_italic": False,
+            "default_font_underline": False,
+            "default_font_strikeout": False,
+            "typeset_toolbar_pos": "right"
+        }
+        
+        for key, default_val in defaults.items():
+            if not self.settings.contains(key):
+                self.settings.setValue(key, default_val)
+                
+        self.settings.sync()
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -243,6 +272,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         has_image = self.workspace.has_images
         selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
         has_any_box = len(selected_boxes) > 0
+        engine = self.settings.value("translation_engine", "google")
         
         # Toolbar State
         self.toolbar.btn_peek.setEnabled(has_image)
@@ -265,10 +295,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         else:
             self.right_dock.btn_run_ocr.setEnabled(not self.is_processing and has_image and has_any_box)
             self.right_dock.btn_run_ocr.setText("Run OCR on Selected")
-
-        if self.nmt_model is None:
+        
+        if engine == "nmt" and self.nmt_model is None:
             self.right_dock.btn_translate_box.setEnabled(False)
-            self.right_dock.btn_translate_box.setText("Translator Required")
+            self.right_dock.btn_translate_box.setText("NMT Model Required")
             self.right_dock.btn_translate_all.setEnabled(False)
         else:
             self.right_dock.btn_translate_box.setEnabled(not self.is_processing and has_image and has_any_box)
@@ -452,6 +482,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         if not self.current_image_item: return
         center = self.view.mapToScene(self.view.viewport().rect().center())
         box = BoundingBoxItem(QRectF(center.x() - 50, center.y() - 100, 100, 200), is_auto=False)
+        self.apply_default_font_settings(box)
         self.scene.addItem(box)
         self.scene.clearSelection()
         box.setSelected(True)

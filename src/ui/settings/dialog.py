@@ -1,18 +1,39 @@
+import os
+import urllib.request
+import zipfile
+import io
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 
+    QDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QGroupBox, QSpinBox, QFontComboBox, QGridLayout,
     QPushButton, QTabWidget, QCheckBox, QMessageBox, QComboBox, QStackedWidget, QListWidget
 )
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, QThread, Signal
 from PySide6.QtGui import QFont, QDesktopServices
 from huggingface_hub import scan_cache_dir
-import os
+
+# --- FONT DOWNLOAD WORKER ---
+class FontDownloadWorker(QThread):
+    finished = Signal(bool, str)
+    def run(self):
+        try:
+            url = "https://dl.dafont.com/dl/?f=anime_ace_bb"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            with urllib.request.urlopen(req) as response:
+                with zipfile.ZipFile(io.BytesIO(response.read())) as z:
+                    fonts_dir = os.path.join(os.getcwd(), "fonts")
+                    os.makedirs(fonts_dir, exist_ok=True)
+                    for file_info in z.infolist():
+                        if file_info.filename.lower().endswith(('.ttf', '.otf')):
+                            z.extract(file_info, fonts_dir)
+            self.finished.emit(True, "Anime Ace BB downloaded and installed successfully!")
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
 class SettingsDialog(QDialog):
     def __init__(self, main_window):
         super().__init__(main_window)
         self.main_window = main_window
         self.setWindowTitle("Settings & Model Manager")
-        self.resize(650, 550)
+        self.resize(650, 600)
         
         self.main_window.model_status_changed.connect(self.update_ui_state)
         
@@ -206,7 +227,49 @@ class SettingsDialog(QDialog):
         fonts_tab = QWidget()
         fonts_layout = QVBoxLayout(fonts_tab)
         
-        fonts_info = QLabel("<b>Custom Fonts</b><br>Drop .ttf or .otf files into the local fonts folder to use them in the app.")
+        # --- Default Font Configuration ---
+        grp_defaults = QGroupBox("Default Font Properties")
+        fd_layout = QGridLayout(grp_defaults)
+        
+        fd_layout.addWidget(QLabel("Family:"), 0, 0)
+        self.def_font_combo = QFontComboBox()
+        def_fam = self.main_window.settings.value("default_font_family", "sans-serif")
+        self.def_font_combo.setCurrentFont(QFont(def_fam))
+        self.def_font_combo.currentFontChanged.connect(lambda f: self.main_window.settings.setValue("default_font_family", f.family()))
+        fd_layout.addWidget(self.def_font_combo, 0, 1, 1, 3)
+        
+        fd_layout.addWidget(QLabel("Size:"), 1, 0)
+        self.def_size_spin = QSpinBox()
+        self.def_size_spin.setRange(1, 999)
+        self.def_size_spin.setValue(int(self.main_window.settings.value("default_font_size", 16)))
+        self.def_size_spin.valueChanged.connect(lambda v: self.main_window.settings.setValue("default_font_size", v))
+        fd_layout.addWidget(self.def_size_spin, 1, 1, 1, 3)
+        
+        self.def_chk_bold = QCheckBox("Bold")
+        self.def_chk_bold.setChecked(self.main_window.settings.value("default_font_bold", False, type=bool))
+        self.def_chk_bold.stateChanged.connect(lambda: self.main_window.settings.setValue("default_font_bold", self.def_chk_bold.isChecked()))
+        
+        self.def_chk_italic = QCheckBox("Italic")
+        self.def_chk_italic.setChecked(self.main_window.settings.value("default_font_italic", False, type=bool))
+        self.def_chk_italic.stateChanged.connect(lambda: self.main_window.settings.setValue("default_font_italic", self.def_chk_italic.isChecked()))
+        
+        self.def_chk_under = QCheckBox("Underline")
+        self.def_chk_under.setChecked(self.main_window.settings.value("default_font_underline", False, type=bool))
+        self.def_chk_under.stateChanged.connect(lambda: self.main_window.settings.setValue("default_font_underline", self.def_chk_under.isChecked()))
+        
+        self.def_chk_strike = QCheckBox("Strikeout")
+        self.def_chk_strike.setChecked(self.main_window.settings.value("default_font_strikeout", False, type=bool))
+        self.def_chk_strike.stateChanged.connect(lambda: self.main_window.settings.setValue("default_font_strikeout", self.def_chk_strike.isChecked()))
+        
+        fd_layout.addWidget(self.def_chk_bold, 2, 0)
+        fd_layout.addWidget(self.def_chk_italic, 2, 1)
+        fd_layout.addWidget(self.def_chk_under, 2, 2)
+        fd_layout.addWidget(self.def_chk_strike, 2, 3)
+        
+        fonts_layout.addWidget(grp_defaults)
+
+        # --- Custom Local Fonts ---
+        fonts_info = QLabel("<b>Custom Fonts Directory</b><br>Drop .ttf or .otf files into the local fonts folder to use them.")
         fonts_layout.addWidget(fonts_info)
         
         h_layout = QHBoxLayout()
@@ -226,11 +289,17 @@ class SettingsDialog(QDialog):
         fonts_layout.addLayout(h_layout)
         
         btn_fonts_layout = QHBoxLayout()
+        
+        self.btn_dl_font = QPushButton("Download Anime Ace BB")
+        self.btn_dl_font.clicked.connect(self._download_manga_font)
+        self._update_font_dl_btn_state()
+        
         btn_open_folder = QPushButton("Open Fonts Folder")
         btn_open_folder.clicked.connect(self._open_fonts_folder)
         btn_reload = QPushButton("Reload Fonts")
         btn_reload.clicked.connect(self._reload_fonts_from_settings)
         
+        btn_fonts_layout.addWidget(self.btn_dl_font)
         btn_fonts_layout.addWidget(btn_open_folder)
         btn_fonts_layout.addWidget(btn_reload)
         fonts_layout.addLayout(btn_fonts_layout)
@@ -250,7 +319,44 @@ class SettingsDialog(QDialog):
             pass
         super().closeEvent(event)
 
-    # --- FONT SETTING HELPERS ---
+    # --- FONT DOWNLOADER HELPERS ---
+    def _update_font_dl_btn_state(self):
+        """Checks if Anime Ace is already in the fonts folder and updates the button UI."""
+        fonts_dir = os.path.join(os.getcwd(), "fonts")
+        is_downloaded = False
+        if os.path.exists(fonts_dir):
+            for f in os.listdir(fonts_dir):
+                if "animeace" in f.lower():
+                    is_downloaded = True
+                    break
+                    
+        if is_downloaded:
+            self.btn_dl_font.setEnabled(False)
+            self.btn_dl_font.setText("Anime Ace BB Downloaded")
+            self.btn_dl_font.setStyleSheet("background-color: #444444; color: #aaaaaa;")
+        else:
+            self.btn_dl_font.setEnabled(True)
+            self.btn_dl_font.setText("Download Anime Ace BB")
+            self.btn_dl_font.setStyleSheet("background-color: #0056b3; color: white;")
+
+    def _download_manga_font(self):
+        self.btn_dl_font.setEnabled(False)
+        self.btn_dl_font.setText("Downloading...")
+        self.btn_dl_font.setStyleSheet("background-color: #444444; color: #aaaaaa;")
+        
+        self.font_downloader = FontDownloadWorker()
+        self.font_downloader.finished.connect(self._on_font_downloaded)
+        self.font_downloader.start()
+
+    def _on_font_downloaded(self, success, msg):
+        self._update_font_dl_btn_state() # Refresh state based on download result
+        if success:
+            QMessageBox.information(self, "Success", msg)
+            self._reload_fonts_from_settings()
+        else:
+            QMessageBox.warning(self, "Download Failed", f"Failed to download font: {msg}")
+
+    # --- OTHER HELPERS ---
     def _update_font_preview(self, font_family):
         if font_family:
             self.font_preview.setFont(QFont(font_family, 24))
@@ -265,6 +371,11 @@ class SettingsDialog(QDialog):
         self.font_list.clear()
         for font in self.main_window.external_fonts:
             self.font_list.addItem(font)
+            
+        def_fam = self.main_window.settings.value("default_font_family", "sans-serif")
+        self.def_font_combo.setCurrentFont(QFont(def_fam))
+        
+        self._update_font_dl_btn_state()
 
     # --- MODEL & TRANSLATION SETTING HELPERS ---
     def _on_engine_changed(self, index):
@@ -418,4 +529,3 @@ class SettingsDialog(QDialog):
             self._apply_state(nmt_loaded, nmt_loading, nmt_queued, self.model_widgets["nmt_translator"])
         except RuntimeError:
             pass
-        

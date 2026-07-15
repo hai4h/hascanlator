@@ -28,6 +28,7 @@ class WorkerProcessingMixin:
         new_boxes = []
         for rect in boxes:
             box_item = BoundingBoxItem(rect, is_auto=True)
+            self.apply_default_font_settings(box_item)
             self.scene.addItem(box_item)
             new_boxes.append(box_item)
             

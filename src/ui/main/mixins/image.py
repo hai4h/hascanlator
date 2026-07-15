@@ -163,12 +163,6 @@ class ImageOperationsMixin:
                 
         self.refresh_font_combo(current_font=family)
 
-    # def set_text_font_size(self, delta):
-    #     for box in self.scene.selectedItems():
-    #         if isinstance(box, BoundingBoxItem):
-    #             box.font_size = max(1, box.font_size + delta)
-    #             if box.is_typeset: box.update_typeset()
-
     def set_text_font_size_exact(self, size):
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
@@ -199,13 +193,26 @@ class ImageOperationsMixin:
                 box.is_strikeout = not box.is_strikeout
                 if box.is_typeset: box.update_typeset()
 
+    def apply_default_font_settings(self, box):
+        """Applies global font settings from QSettings to a specific box."""
+        box.font_family = self.settings.value("default_font_family", "sans-serif")
+        box.font_size = int(self.settings.value("default_font_size", 16))
+        
+        # Determine boolean value safely from QSettings strings ("true"/"false")
+        def _get_bool(key, default=False):
+            val = self.settings.value(key, default)
+            if isinstance(val, str):
+                return val.lower() == "true"
+            return bool(val)
+
+        box.is_bold = _get_bool("default_font_bold")
+        box.is_italic = _get_bool("default_font_italic")
+        box.is_underline = _get_bool("default_font_underline")
+        box.is_strikeout = _get_bool("default_font_strikeout")
+
     def reset_text_font(self):
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
-                box.font_family = "sans-serif"
-                box.font_size = 16
-                box.is_bold = False
-                box.is_italic = False
-                box.is_underline = False
-                box.is_strikeout = False
-                if box.is_typeset: box.update_typeset()
+                self.apply_default_font_settings(box)
+                if box.is_typeset: 
+                    box.update_typeset()

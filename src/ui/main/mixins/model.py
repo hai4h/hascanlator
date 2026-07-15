@@ -24,7 +24,9 @@ class ModelManagementMixin:
         self.model_status_changed.emit()
         self.update_button_states()
         
-        loader = ModelLoaderWorker(model_name)
+        nmt_repo_id = self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
+        loader = ModelLoaderWorker(model_name, nmt_repo_id=nmt_repo_id)
+        
         self.loader_threads.append(loader)
         loader.finished.connect(lambda m, n, t=loader: self.on_model_loaded(m, n, t))
         loader.error.connect(lambda n, e, t=loader: self.on_model_error(n, e, t))

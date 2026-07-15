@@ -4,9 +4,10 @@ class ModelLoaderWorker(QThread):
     finished = Signal(object, str) 
     error = Signal(str, str)
 
-    def __init__(self, model_name):
+    def __init__(self, model_name, nmt_repo_id="Helsinki-NLP/opus-mt-ja-en"):
         super().__init__()
         self.model_name = model_name
+        self.nmt_repo_id = nmt_repo_id
 
     def run(self):
         try:
@@ -24,9 +25,9 @@ class ModelLoaderWorker(QThread):
 
             elif self.model_name == "nmt_translator":
                 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-                from PySide6.QtCore import QSettings
                 
-                repo_id = QSettings("HAScanlatorTeam", "HAScanlator").value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
+                # Use passed repo_id instead of reading config here
+                repo_id = self.nmt_repo_id 
                 tokenizer = AutoTokenizer.from_pretrained(repo_id)
                 model = AutoModelForSeq2SeqLM.from_pretrained(repo_id)
                 
@@ -37,7 +38,6 @@ class ModelLoaderWorker(QThread):
                         self.repo = repo
                         
                     def __call__(self, text, src_lang="ja", tgt_lang="en"):
-                        # NLLB Multilingual Support Logic
                         if "nllb" in self.repo:
                             lang_map = {
                                 "auto": "jpn_Jpan", "ja": "jpn_Jpan", "en": "eng_Latn", 
@@ -49,7 +49,6 @@ class ModelLoaderWorker(QThread):
                             
                             target_code = lang_map.get(tgt_lang, "eng_Latn")
                             
-                            # FIX: Safely retrieve the language token ID
                             if hasattr(self.tokenizer, "lang_code_to_id"):
                                 forced_bos_token_id = self.tokenizer.lang_code_to_id[target_code]
                             else:
@@ -60,7 +59,6 @@ class ModelLoaderWorker(QThread):
                                 forced_bos_token_id=forced_bos_token_id
                             )
                         else:
-                            # Standard Helsinki-NLP (Language is hardcoded in the model)
                             inputs = self.tokenizer(text, return_tensors="pt", padding=True)
                             translated_tokens = self.model.generate(**inputs)
                             

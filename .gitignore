@@ -9,3 +9,4 @@ venv/
 test/
 revision/
 fonts/
+config.ini
