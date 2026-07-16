@@ -23,7 +23,7 @@ class MangaCanvasView(QGraphicsView):
         if event.modifiers() == Qt.ControlModifier:
             if event.angleDelta().y() > 0: self.scale(1.15, 1.15)
             else: self.scale(1/1.15, 1/1.15)
-        else: 
+        else:
             super().wheelEvent(event)
 
     def mousePressEvent(self, event):
@@ -33,7 +33,7 @@ class MangaCanvasView(QGraphicsView):
             self._pan_start_y = event.position().y()
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
-        else: 
+        else:
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -45,21 +45,13 @@ class MangaCanvasView(QGraphicsView):
             self._pan_start_x = event.position().x()
             self._pan_start_y = event.position().y()
             event.accept()
-        else: 
+        else:
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MiddleButton:
-            self._is_panning = False
-            self.setCursor(Qt.ArrowCursor)
-            event.accept()
-        else: 
-            super().mouseReleaseEvent(event)
-
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
-            for item in self.scene().selectedItems():
-                if isinstance(item, BoundingBoxItem):
-                    self.scene().removeItem(item)
-        else: 
-            super().keyPressEvent(event)
+            if event.button() == Qt.MiddleButton:
+                self._is_panning = False
+                self.setCursor(Qt.ArrowCursor)
+                event.accept()
+            else:
+                super().mouseReleaseEvent(event)

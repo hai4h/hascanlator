@@ -1,10 +1,10 @@
 import os
 import psutil
 
-from PySide6.QtGui import QPixmap, QFontDatabase, QDesktopServices, QFont, QColor
+from PySide6.QtGui import QPixmap, QFontDatabase, QDesktopServices, QFont, QColor, QShortcut, QKeySequence
 from PySide6.QtCore import Qt, QRectF, Signal, QSettings, QTimer, QUrl
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QProgressBar, QLabel
 )
 
@@ -31,26 +31,26 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         super().__init__()
         self.setWindowTitle("HAScanlator")
         self.resize(1300, 800)
-        
+
         config_path = os.path.join(os.getcwd(), "config.ini")
         self.settings = QSettings(config_path, QSettings.IniFormat)
         # populate config.ini with all defaults immediately
         self._initialize_config_defaults()
         self.workspace = WorkspaceManager()
-        
+
         self.current_image_item = None
         self.current_selected_box = None
-        self._updating_ui = False 
-        self.is_processing = False 
-        
+        self._updating_ui = False
+        self.is_processing = False
+
         self.mocr_model, self.mocr_is_loading = None, False
         self.yolo_model, self.yolo_is_loading = None, False
         self.nmt_model, self.nmt_is_loading = None, False
 
         self.model_load_queue = []
         self.is_loading_model_seq = False
-        
-        self.loader_threads = [] 
+
+        self.loader_threads = []
         self.ocr_worker = None
         self.detect_worker = None
         self.translation_worker = None
@@ -60,7 +60,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         self._setup_ui()
         self._connect_signals()
-        
+        self._setup_shortcuts()
+
         self.update_window_title()
         self.update_button_states()
 
@@ -91,14 +92,95 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "default_font_italic": False,
             "default_font_underline": False,
             "default_font_strikeout": False,
-            "typeset_toolbar_pos": "right"
+            "typeset_toolbar_pos": "right",
+            
+            # Keybind Defaults
+            "keybind_select_all": "Ctrl+A",
+            "keybind_delete_box": "Del",
+            "keybind_load_images": "",
+            "keybind_reset_workspace": "",
+            "keybind_open_settings": "",
+            "keybind_next_page": "",
+            "keybind_prev_page": "",
+            "keybind_add_box": "",
+            "keybind_undo_edit": "",
+            "keybind_auto_detect": "",
+            "keybind_run_ocr": "",
+            "keybind_translate_box": "",
+            "keybind_translate_all": "",
+            "keybind_smart_clean": "",
+            "keybind_toggle_typeset": "",
+            "keybind_bold": "",
+            "keybind_italic": "",
+            "keybind_underline": "",
+            "keybind_strikeout": "",
+            "keybind_align_left": "",
+            "keybind_align_center": "",
+            "keybind_align_right": "",
+            "keybind_font_up": "",
+            "keybind_font_down": "",
+            "keybind_line_space_up": "",
+            "keybind_line_space_down": "",
+            "keybind_indent_up": "",
+            "keybind_indent_down": ""
         }
-        
+
         for key, default_val in defaults.items():
             if not self.settings.contains(key):
                 self.settings.setValue(key, default_val)
-                
+
         self.settings.sync()
+
+    def _setup_shortcuts(self):
+        self.shortcuts = {}
+        
+        bindings = [
+            ("keybind_load_images", self.load_images_dialog),
+            ("keybind_reset_workspace", self.reset_workspace),
+            ("keybind_open_settings", lambda: self.open_settings()),
+            ("keybind_next_page", self.next_image),
+            ("keybind_prev_page", self.prev_image),
+            ("keybind_select_all", self.select_all_boxes),
+            ("keybind_delete_box", self.delete_selected_box),
+            ("keybind_add_box", self.add_test_box),
+            ("keybind_undo_edit", self.undo_edit),
+            ("keybind_auto_detect", self.run_auto_detect),
+            ("keybind_run_ocr", self.run_ocr_on_selected),
+            ("keybind_translate_box", self.run_translation_on_selected),
+            ("keybind_translate_all", self.run_translation_on_all),
+            ("keybind_smart_clean", self.smart_clean_bubble),
+            ("keybind_toggle_typeset", self.toggle_typeset_view),
+            ("keybind_bold", self.toggle_text_bold),
+            ("keybind_italic", self.toggle_text_italic),
+            ("keybind_underline", self.toggle_text_underline),
+            ("keybind_strikeout", self.toggle_text_strikeout),
+            ("keybind_align_left", lambda: self.set_text_alignment(Qt.AlignLeft)),
+            ("keybind_align_center", lambda: self.set_text_alignment(Qt.AlignCenter)),
+            ("keybind_align_right", lambda: self.set_text_alignment(Qt.AlignRight)),
+            ("keybind_font_up", lambda: self.typeset_toolbar.spin_size.setValue(self.typeset_toolbar.spin_size.value() + 1)),
+            ("keybind_font_down", lambda: self.typeset_toolbar.spin_size.setValue(self.typeset_toolbar.spin_size.value() - 1)),
+            ("keybind_line_space_up", lambda: self.set_text_line_spacing(0.1)),
+            ("keybind_line_space_down", lambda: self.set_text_line_spacing(-0.1)),
+            ("keybind_indent_up", lambda: self.set_text_indent(5)),
+            ("keybind_indent_down", lambda: self.set_text_indent(-5)),
+        ]
+        
+        for key, func in bindings:
+            default_val = "Ctrl+A" if key == "keybind_select_all" else "Del" if key == "keybind_delete_box" else ""
+            sc = QShortcut(QKeySequence(self.settings.value(key, default_val)), self.view)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)
+            sc.activated.connect(func)
+            self.shortcuts[key] = sc
+
+    def reload_shortcuts(self):
+        for key, sc in self.shortcuts.items():
+            default_val = "Ctrl+A" if key == "keybind_select_all" else "Del" if key == "keybind_delete_box" else ""
+            sc.setKey(QKeySequence(self.settings.value(key, default_val)))
+
+    def select_all_boxes(self):
+        for item in self.scene.items():
+            if isinstance(item, BoundingBoxItem):
+                item.setSelected(True)
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -111,66 +193,66 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.nav = BottomNavigation(self)
         self.right_dock = EditorDockWidget(self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.right_dock)
-        
+
         center_area = QWidget()
         center_layout = QVBoxLayout(center_area)
         center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(0)
-        
+
         self.scene = QGraphicsScene()
         self.view = MangaCanvasView(self.scene)
-        
+
         # Parent the toolbar directly to the view so it acts as an overlay layer ON TOP of the canvas
-        self.typeset_toolbar = TypesetToolBar(self.view) 
-        self.typeset_toolbar.setVisible(False) 
+        self.typeset_toolbar = TypesetToolBar(self.view)
+        self.typeset_toolbar.setVisible(False)
         self.typeset_toolbar.position_requested.connect(self.set_typeset_toolbar_position)
-        
+
         # Connect the canvas resize event so the overlay sticks tightly to the edges
         self.view.resized.connect(self.update_toolbar_geometry)
-        
+
         center_layout.addWidget(self.view, stretch=1)
         center_layout.addWidget(self.nav)
-        
+
         # Apply initial position from settings
         initial_pos = self.settings.value("typeset_toolbar_pos", "right")
         self.set_typeset_toolbar_position(initial_pos)
-        
+
         main_layout.addWidget(self.toolbar)
-        main_layout.addWidget(center_area, stretch=1) 
+        main_layout.addWidget(center_area, stretch=1)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setMaximumWidth(300)
         self.progress_bar.setVisible(False)
         self.statusBar().addPermanentWidget(self.progress_bar)
-        
+
         self.ram_lbl = QLabel("RAM: 0.00 GB")
         self.ram_lbl.setStyleSheet("padding-left: 10px; padding-right: 10px; color: #888;")
         self.statusBar().addPermanentWidget(self.ram_lbl)
-        
+
         try:
             self.system_total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
         except Exception:
             self.system_total_ram_gb = 0.0
-        
+
         self.ram_timer = QTimer(self)
         self.ram_timer.timeout.connect(self._update_ram_usage)
-        self.ram_timer.start(2000) 
+        self.ram_timer.start(2000)
         self._update_ram_usage()
-        
+
         self.statusBar().showMessage("Ready")
 
     def _connect_signals(self):
         self.toolbar.btn_load.clicked.connect(self.load_images_dialog)
         self.toolbar.btn_reset.clicked.connect(self.reset_workspace)
-        
+
         self.toolbar.btn_peek.pressed.connect(self.show_original_image)
         self.toolbar.btn_peek.released.connect(self.show_edited_image)
         self.toolbar.btn_undo.clicked.connect(self.undo_edit)
-        
+
         self.toolbar.btn_auto_detect.clicked.connect(self.run_auto_detect)
         self.toolbar.btn_add_box.clicked.connect(self.add_test_box)
         self.toolbar.btn_settings.clicked.connect(lambda: SettingsDialog(self).exec())
-        
+
         self.toolbar.chk_auto_process.setChecked(self.settings.value("auto_process", False, type=bool))
         self.toolbar.chk_auto_process.stateChanged.connect(
             lambda: self.settings.setValue("auto_process", self.toolbar.chk_auto_process.isChecked())
@@ -186,11 +268,11 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.right_dock.trans_input.textChanged.connect(self.on_trans_text_edited)
         self.right_dock.btn_translate_box.clicked.connect(self.run_translation_on_selected)
         self.right_dock.btn_translate_all.clicked.connect(self.run_translation_on_all)
-        
+
         # --- TYPESET SIGNALS ---
         self.typeset_toolbar.btn_clean_bubble.clicked.connect(self.smart_clean_bubble)
         self.typeset_toolbar.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
-        
+
         # --- TEXT ALIGN SIGNALS ---
         self.typeset_toolbar.btn_align_left.clicked.connect(lambda: self.set_text_alignment(Qt.AlignLeft))
         self.typeset_toolbar.btn_align_center.clicked.connect(lambda: self.set_text_alignment(Qt.AlignCenter))
@@ -198,7 +280,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.typeset_toolbar.btn_valign_top.clicked.connect(lambda: self.set_text_valignment(Qt.AlignTop))
         self.typeset_toolbar.btn_valign_middle.clicked.connect(lambda: self.set_text_valignment(Qt.AlignVCenter))
         self.typeset_toolbar.btn_valign_bottom.clicked.connect(lambda: self.set_text_valignment(Qt.AlignBottom))
-        
+
         # --- TEXT INDENT SIGNALS ---
         self.typeset_toolbar.btn_indent_plus.clicked.connect(lambda: self.set_text_indent(5))
         self.typeset_toolbar.btn_indent_minus.clicked.connect(lambda: self.set_text_indent(-5))
@@ -211,16 +293,16 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.typeset_toolbar.btn_reload_fonts.clicked.connect(self.reload_custom_fonts)
         self.typeset_toolbar.btn_open_fonts.clicked.connect(lambda: self.open_settings(tab_index=2))
         self.typeset_toolbar.font_combo.currentIndexChanged.connect(self._on_font_combo_changed)
-        
+
         self.typeset_toolbar.spin_size.valueChanged.connect(self.set_text_font_size_exact)
-        
+
         self.typeset_toolbar.btn_size_plus.clicked.connect(
             lambda: self.typeset_toolbar.spin_size.setValue(self.typeset_toolbar.spin_size.value() + 1)
         )
         self.typeset_toolbar.btn_size_minus.clicked.connect(
             lambda: self.typeset_toolbar.spin_size.setValue(self.typeset_toolbar.spin_size.value() - 1)
         )
-        
+
         self.typeset_toolbar.btn_bold.clicked.connect(self.toggle_text_bold)
         self.typeset_toolbar.btn_italic.clicked.connect(self.toggle_text_italic)
         self.typeset_toolbar.btn_underline.clicked.connect(self.toggle_text_underline)
@@ -238,10 +320,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             title += " - Loading Models..."
         elif custom_status:
             title += f" - {custom_status}"
-        
+
         if self.workspace.has_images:
             title += f"   |   [{self.workspace.current_page_number}/{self.workspace.total_pages}] {self.workspace.current_filename}"
-            
+
         self.setWindowTitle(title)
 
     def set_typeset_toolbar_position(self, pos):
@@ -249,15 +331,15 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.typeset_toolbar.set_position(pos)
         self.settings.setValue("typeset_toolbar_pos", pos)
         self.update_toolbar_geometry()
-        
+
     def update_toolbar_geometry(self):
         """Pins the overlay toolbar to the exact inner edges of the canvas view."""
         if not hasattr(self, 'typeset_toolbar') or not self.view: return
-        
+
         pos = self.settings.value("typeset_toolbar_pos", "right")
         vw = self.view.width()
         vh = self.view.height()
-        
+
         # Calculate absolute pixel coordinates for the overlay relative to the canvas inner walls
         if pos == "left":
             self.typeset_toolbar.setGeometry(0, 0, 50, vh)
@@ -273,21 +355,21 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
         has_any_box = len(selected_boxes) > 0
         engine = self.settings.value("translation_engine", "google")
-        
+
         # Toolbar State
         self.toolbar.btn_peek.setEnabled(has_image)
         if has_image and len(self.workspace.undo_stacks.get(self.workspace.current_image_path, [])) > 0:
             self.toolbar.btn_undo.setEnabled(True)
         else:
             self.toolbar.btn_undo.setEnabled(False)
-        
+
         if self.yolo_model is None:
             self.toolbar.btn_auto_detect.setEnabled(False)
             self.toolbar.btn_auto_detect.setText("Auto Detect\n(Detector Required)")
         else:
             self.toolbar.btn_auto_detect.setEnabled(not self.is_processing and has_image)
             self.toolbar.btn_auto_detect.setText("Auto Detect\n(Whole Page)")
-            
+
         # OCR / Trans State
         if self.mocr_model is None:
             self.right_dock.btn_run_ocr.setEnabled(False)
@@ -295,7 +377,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         else:
             self.right_dock.btn_run_ocr.setEnabled(not self.is_processing and has_image and has_any_box)
             self.right_dock.btn_run_ocr.setText("Run OCR on Selected")
-        
+
         if engine == "nmt" and self.nmt_model is None:
             self.right_dock.btn_translate_box.setEnabled(False)
             self.right_dock.btn_translate_box.setText("NMT Model Required")
@@ -304,12 +386,12 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.right_dock.btn_translate_box.setEnabled(not self.is_processing and has_image and has_any_box)
             self.right_dock.btn_translate_box.setText("Translate Selected")
             self.right_dock.btn_translate_all.setEnabled(not self.is_processing and has_image)
-            
+
         self.right_dock.btn_delete_box.setEnabled(has_any_box)
-        
+
         # Lock contextual toolbar if scanning is happening
         self.typeset_toolbar.setEnabled(not self.is_processing)
-            
+
         # Navigation
         self.nav.btn_prev.setEnabled(not self.is_processing and self.workspace.current_img_index > 0)
         self.nav.btn_next.setEnabled(not self.is_processing and self.workspace.current_img_index < self.workspace.total_pages - 1)
@@ -318,7 +400,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         try:
             process = psutil.Process(os.getpid())
             app_gb_usage = process.memory_info().rss / (1024 ** 3)
-            
+
             if getattr(self, 'system_total_ram_gb', 0.0) > 0:
                 self.ram_lbl.setText(f"RAM: {app_gb_usage:.2f} GB / {self.system_total_ram_gb:.1f} GB")
             else:
@@ -350,9 +432,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         path = self.workspace.current_image_path
         self.nav.update_labels(self.workspace.current_page_number, self.workspace.total_pages)
-        
-        self.scene.clear() 
-        
+
+        self.scene.clear()
+
         if path not in self.workspace.original_images:
             cv_img = self.imread_utf8(path)
             self.workspace.original_images[path] = cv_img.copy()
@@ -364,6 +446,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.scene.addItem(self.current_image_item)
         self.scene.setSceneRect(QRectF(pixmap.rect()))
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        self.view.setFocus()
 
         cached_data = self.workspace.get_page_state(path)
         if cached_data:
@@ -373,25 +456,25 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
 
                 box.align = b_data.get('align', Qt.AlignCenter)
-                box.valign = b_data.get('valign', Qt.AlignVCenter) 
+                box.valign = b_data.get('valign', Qt.AlignVCenter)
                 box.indent = b_data.get('indent', 5)
                 box.line_spacing = b_data.get('line_spacing', 1.0)
-                
+
                 box.font_family = b_data.get('font_family', "sans-serif")
                 box.font_size = b_data.get('font_size', 16)
                 box.is_bold = b_data.get('is_bold', False)
                 box.is_italic = b_data.get('is_italic', False)
                 box.is_underline = b_data.get('is_underline', False)
                 box.is_strikeout = b_data.get('is_strikeout', False)
-                
+
                 self.scene.addItem(box)
-                
+
                 if b_data.get('is_typeset', False):
                     box.toggle_typeset(force_state=True)
-                
+
         self.update_window_title()
         self.update_button_states()
-        
+
         if not self.workspace.is_page_processed(path) and self.toolbar.chk_auto_process.isChecked() and self.yolo_model:
             QTimer.singleShot(100, self.run_auto_detect)
 
@@ -402,7 +485,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'raw_text': item.raw_text, 'translated_text': item.translated_text,
             'is_typeset': getattr(item, 'is_typeset', False),
             'align': getattr(item, 'align', Qt.AlignCenter),
-            'valign': getattr(item, 'valign', Qt.AlignVCenter), 
+            'valign': getattr(item, 'valign', Qt.AlignVCenter),
             'indent': getattr(item, 'indent', 5),
             'line_spacing': getattr(item, 'line_spacing', 1.0),
             'font_family': getattr(item, 'font_family', "sans-serif"),
@@ -411,7 +494,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'is_italic': getattr(item, 'is_italic', False),
             'is_underline': getattr(item, 'is_underline', False),
             'is_strikeout': getattr(item, 'is_strikeout', False)
-            
+
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
         self.workspace.save_page_state(self.workspace.current_image_path, boxes)
 
@@ -428,27 +511,27 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
     def on_selection_changed(self):
         boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
         dock = self.right_dock
-        
+
         # --- CONTROL CONTEXT TOOLBAR VISIBILITY ---
         has_any_box = len(boxes) > 0
         self.typeset_toolbar.setVisible(has_any_box)
-        
+
         if len(boxes) == 1:
             self.current_selected_box = boxes[0]
-            self._updating_ui = True 
+            self._updating_ui = True
             dock.ocr_input.setEnabled(True)
             dock.trans_input.setEnabled(True)
             dock.ocr_input.setPlainText(self.current_selected_box.raw_text)
             dock.trans_input.setPlainText(self.current_selected_box.translated_text)
-            
+
             # --- SYNC FONT UI ---
             self.refresh_font_combo(self.current_selected_box.font_family)
-            
+
             self.typeset_toolbar.spin_size.blockSignals(True)
             self.typeset_toolbar.spin_size.setValue(self.current_selected_box.font_size)
             self.typeset_toolbar.spin_size.blockSignals(False)
-            
-            self._updating_ui = False 
+
+            self._updating_ui = False
         else:
             self.current_selected_box = None
             self._updating_ui = True
@@ -456,16 +539,16 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             dock.trans_input.clear()
             dock.ocr_input.setEnabled(False)
             dock.trans_input.setEnabled(False)
-            
+
             if len(boxes) > 1:
                 dock.ocr_input.setPlaceholderText(f"{len(boxes)} boxes selected.")
                 dock.trans_input.setPlaceholderText(f"{len(boxes)} boxes selected.")
             else:
                 dock.ocr_input.setPlaceholderText("")
                 dock.trans_input.setPlaceholderText("")
-                
+
             self._updating_ui = False
-            
+
         self.update_button_states()
 
     def on_ocr_text_edited(self):
@@ -501,10 +584,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
     def reload_custom_fonts(self):
         fonts_dir = os.path.join(os.getcwd(), "fonts")
         os.makedirs(fonts_dir, exist_ok=True)
-        
+
         self.external_fonts = []
         loaded = 0
-        
+
         # Traverse all directories and subdirectories inside /fonts
         for root, _, files in os.walk(fonts_dir):
             for filename in files:
@@ -517,7 +600,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                             if family not in self.external_fonts:
                                 self.external_fonts.append(family)
                         loaded += 1
-                        
+
         if loaded > 0:
             self.statusBar().showMessage(f"Loaded {loaded} custom font(s) from local folders.")
         self.refresh_font_combo()
@@ -546,8 +629,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         def add_font_item(family):
             combo.addItem(family)
             idx = combo.count() - 1
-            combo.setItemData(idx, family, Qt.UserRole) 
-            combo.setItemData(idx, QFont(family), Qt.FontRole) 
+            combo.setItemData(idx, family, Qt.UserRole)
+            combo.setItemData(idx, QFont(family), Qt.FontRole)
 
         if current_font:
             add_header("--- CURRENT ---")
@@ -565,11 +648,11 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         for f in all_fonts: add_font_item(f)
 
         if current_font:
-            combo.setCurrentIndex(1) 
-            
+            combo.setCurrentIndex(1)
+
         combo.blockSignals(False)
 
     def _on_font_combo_changed(self, index):
         family = self.typeset_toolbar.font_combo.itemData(index, Qt.UserRole)
-        if family: 
+        if family:
             self.set_text_font_family(family)
