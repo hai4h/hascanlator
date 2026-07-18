@@ -12,24 +12,39 @@ class ModelLoaderWorker(QThread):
     def run(self):
         try:
             if self.model_name == "manga_ocr":
+                from huggingface_hub import snapshot_download
+                try:
+                    model_path = snapshot_download(repo_id="kha-white/manga-ocr-base", token=False)
+                except Exception as dl_err:
+                    raise RuntimeError(f"Could not download model. If you have network restrictions, enable 'HuggingFace Mirror' in Settings.\n\nError: {dl_err}")
+                
                 from manga_ocr import MangaOcr
-                model = MangaOcr() 
+                model = MangaOcr(pretrained_model_name_or_path=model_path) 
                 self.finished.emit(model, self.model_name)
                 
             elif self.model_name == "yolo_detector":
                 from ultralytics import YOLO
                 from huggingface_hub import hf_hub_download
-                model_path = hf_hub_download(repo_id="ogkalu/manga-text-detector-yolov8s", filename="manga-text-detector.pt")
+                try:
+                    model_path = hf_hub_download(repo_id="ogkalu/manga-text-detector-yolov8s", filename="manga-text-detector.pt", token=False)
+                except Exception as dl_err:
+                    raise RuntimeError(f"Could not download model. If you have network restrictions, enable 'HuggingFace Mirror' in Settings.\n\nError: {dl_err}")
+                
                 model = YOLO(model_path)
                 self.finished.emit(model, self.model_name)
 
             elif self.model_name == "nmt_translator":
                 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+                from huggingface_hub import snapshot_download
                 
-                # Use passed repo_id instead of reading config here
                 repo_id = self.nmt_repo_id 
-                tokenizer = AutoTokenizer.from_pretrained(repo_id)
-                model = AutoModelForSeq2SeqLM.from_pretrained(repo_id)
+                try:
+                    model_path = snapshot_download(repo_id=repo_id, token=False)
+                except Exception as dl_err:
+                    raise RuntimeError(f"Could not download model. If you have network restrictions, enable 'HuggingFace Mirror' in Settings.\n\nError: {dl_err}")
+                
+                tokenizer = AutoTokenizer.from_pretrained(model_path)
+                model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
                 
                 class NMTWrapper:
                     def __init__(self, tok, mod, repo):

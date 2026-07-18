@@ -47,6 +47,11 @@ class SettingsDialog(QDialog):
         models_tab = QWidget()
         self.models_layout = QVBoxLayout(models_tab)
 
+        chk_mirror = QCheckBox("Use HuggingFace Mirror (hf-mirror.com) to bypass network restrictions")
+        chk_mirror.setChecked(self.main_window.settings.value("use_hf_mirror", False, type=bool))
+        chk_mirror.stateChanged.connect(self._on_mirror_changed)
+        self.models_layout.addWidget(chk_mirror)
+
         global_btns_layout = QHBoxLayout()
         btn_load_all = QPushButton("Load All Available")
         btn_load_all.setStyleSheet("font-weight: bold; padding: 8px;")
@@ -352,7 +357,8 @@ class SettingsDialog(QDialog):
         add_bind("Auto Detect Text (YOLO):", "keybind_auto_detect")
         add_bind("Run OCR on Selected:", "keybind_run_ocr")
         add_bind("Translate Selected Box:", "keybind_translate_box")
-        add_bind("Translate All Boxes:", "keybind_translate_all")
+        add_bind("Translate & Typeset Selected:", "keybind_trans_type_sel")
+        add_bind("Translate & Typeset All:", "keybind_trans_type_all")
         add_bind("Smart Clean Bubble:", "keybind_smart_clean")
 
         add_header("Typesetting & Formatting")
@@ -386,6 +392,14 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.tabs)
 
         self.update_ui_state()
+
+    def _on_mirror_changed(self, state):
+        is_checked = state == 2  # 2 corresponds to Qt.Checked
+        self.main_window.settings.setValue("use_hf_mirror", is_checked)
+        if is_checked:
+            os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+        else:
+            os.environ.pop("HF_ENDPOINT", None)
 
     def _save_keybind(self, setting_key, key_sequence):
         # Save sequence instantly and force the main window to update active bindings
@@ -514,7 +528,7 @@ class SettingsDialog(QDialog):
 
     def load_all_models(self):
         for key, w_dict in self.model_widgets.items():
-            if not self.is_model_downloaded(w_dict["get_repo_id"]()): continue
+            if not self.main_window.is_model_downloaded(w_dict["get_repo_id"]()): continue
             if key not in self.main_window.model_load_queue:
                 is_loaded = False
                 if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
@@ -529,14 +543,6 @@ class SettingsDialog(QDialog):
             if key == "yolo_detector" and self.main_window.yolo_model: is_loaded = True
             if key == "nmt_translator" and self.main_window.nmt_model: is_loaded = True
             if is_loaded: self.main_window.unload_model(key)
-
-    def is_model_downloaded(self, repo_id):
-        try:
-            hf_cache_info = scan_cache_dir()
-            for repo in hf_cache_info.repos:
-                if repo.repo_id == repo_id: return True
-            return False
-        except Exception: return False
 
     def delete_model(self, load_key, repo_id):
         reply = QMessageBox.question(self, "Confirm Deletion", "Are you sure you want to delete this model from your disk? You will need to redownload it next time.", QMessageBox.Yes | QMessageBox.No)
@@ -555,7 +561,7 @@ class SettingsDialog(QDialog):
             self.update_ui_state()
 
     def _apply_state(self, is_loaded, is_loading, is_queued, w_dict):
-        is_downloaded = self.is_model_downloaded(w_dict["get_repo_id"]())
+        is_downloaded = self.main_window.is_model_downloaded(w_dict["get_repo_id"]())
         w_dict["chk_auto"].setEnabled(is_downloaded)
         if not is_downloaded:
             w_dict["chk_auto"].blockSignals(True)
@@ -575,7 +581,7 @@ class SettingsDialog(QDialog):
             w_dict["btn_load"].setEnabled(False)
             w_dict["btn_unload"].setEnabled(True)
         elif is_loading:
-            w_dict["status_lbl"].setText("Status: <font color='orange'>Downloading / Loading... (Check terminal)</font>")
+            w_dict["status_lbl"].setText("Status: <font color='orange'>Downloading / Loading...</font>")
             w_dict["btn_load"].setEnabled(False)
             w_dict["btn_unload"].setEnabled(False)
             w_dict["btn_delete"].setEnabled(False)

@@ -36,6 +36,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.settings = QSettings(config_path, QSettings.IniFormat)
         # populate config.ini with all defaults immediately
         self._initialize_config_defaults()
+        
+        if self.settings.value("use_hf_mirror", False, type=bool):
+            os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+            
         self.workspace = WorkspaceManager()
 
         self.current_image_item = None
@@ -82,6 +86,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "auto_load_yolo": False,
             "auto_load_nmt": False,
             "auto_process": False,  # Auto-Scan in UI
+            "use_hf_mirror": False,
             "translation_engine": "google",
             "nmt_model_repo": "Helsinki-NLP/opus-mt-ja-en",
             "trans_src": "ja",
@@ -107,7 +112,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "keybind_auto_detect": "",
             "keybind_run_ocr": "",
             "keybind_translate_box": "",
-            "keybind_translate_all": "",
+            "keybind_trans_type_sel": "",
+            "keybind_trans_type_all": "",
             "keybind_smart_clean": "",
             "keybind_toggle_typeset": "",
             "keybind_bold": "",
@@ -147,7 +153,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             ("keybind_auto_detect", self.run_auto_detect),
             ("keybind_run_ocr", self.run_ocr_on_selected),
             ("keybind_translate_box", self.run_translation_on_selected),
-            ("keybind_translate_all", self.run_translation_on_all),
+            ("keybind_trans_type_sel", self.run_translate_typeset_selected),
+            ("keybind_trans_type_all", self.run_translate_typeset_all),
             ("keybind_smart_clean", self.smart_clean_bubble),
             ("keybind_toggle_typeset", self.toggle_typeset_view),
             ("keybind_bold", self.toggle_text_bold),
@@ -267,8 +274,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.right_dock.ocr_input.textChanged.connect(self.on_ocr_text_edited)
         self.right_dock.trans_input.textChanged.connect(self.on_trans_text_edited)
         self.right_dock.btn_translate_box.clicked.connect(self.run_translation_on_selected)
-        self.right_dock.btn_translate_all.clicked.connect(self.run_translation_on_all)
-
+        self.right_dock.btn_trans_type_sel.clicked.connect(self.run_translate_typeset_selected)
+        self.right_dock.btn_trans_type_all.clicked.connect(self.run_translate_typeset_all)
+        
         # --- TYPESET SIGNALS ---
         self.typeset_toolbar.btn_clean_bubble.clicked.connect(self.smart_clean_bubble)
         self.typeset_toolbar.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
@@ -363,30 +371,16 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         else:
             self.toolbar.btn_undo.setEnabled(False)
 
-        if self.yolo_model is None:
-            self.toolbar.btn_auto_detect.setEnabled(False)
-            self.toolbar.btn_auto_detect.setText("Auto Detect\n(Detector Required)")
-        else:
-            self.toolbar.btn_auto_detect.setEnabled(not self.is_processing and has_image)
-            self.toolbar.btn_auto_detect.setText("Auto Detect\n(Whole Page)")
-
+        self.toolbar.btn_auto_detect.setEnabled(not self.is_processing and has_image)
+        self.toolbar.btn_auto_detect.setText("Auto Detect\n(Whole Page)")
+            
         # OCR / Trans State
-        if self.mocr_model is None:
-            self.right_dock.btn_run_ocr.setEnabled(False)
-            self.right_dock.btn_run_ocr.setText("OCR Model Required")
-        else:
-            self.right_dock.btn_run_ocr.setEnabled(not self.is_processing and has_image and has_any_box)
-            self.right_dock.btn_run_ocr.setText("Run OCR on Selected")
-
-        if engine == "nmt" and self.nmt_model is None:
-            self.right_dock.btn_translate_box.setEnabled(False)
-            self.right_dock.btn_translate_box.setText("NMT Model Required")
-            self.right_dock.btn_translate_all.setEnabled(False)
-        else:
-            self.right_dock.btn_translate_box.setEnabled(not self.is_processing and has_image and has_any_box)
-            self.right_dock.btn_translate_box.setText("Translate Selected")
-            self.right_dock.btn_translate_all.setEnabled(not self.is_processing and has_image)
-
+        self.right_dock.btn_run_ocr.setEnabled(not self.is_processing and has_image and has_any_box)
+        
+        self.right_dock.btn_translate_box.setEnabled(not self.is_processing and has_image and has_any_box)
+        self.right_dock.btn_trans_type_sel.setEnabled(not self.is_processing and has_image and has_any_box)
+        self.right_dock.btn_trans_type_all.setEnabled(not self.is_processing and has_image)
+        
         self.right_dock.btn_delete_box.setEnabled(has_any_box)
 
         # Lock contextual toolbar if scanning is happening

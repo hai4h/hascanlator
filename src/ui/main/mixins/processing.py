@@ -1,13 +1,14 @@
 from PySide6.QtWidgets import QMessageBox
-from src.core.detection_worker import DetectionWorker
-from src.core.ocr_worker import BatchOCRWorker
-from src.core.translation_worker import BatchTranslationWorker
+from src.core.detection import DetectionWorker
+from src.core.ocr import BatchOCRWorker
+from src.core.translation import BatchTranslationWorker
 from src.ui.canvas.items import BoundingBoxItem
 
 class WorkerProcessingMixin:
     # --- DETECTION & OCR LOGIC ---
     def run_auto_detect(self):
-        if not self.workspace.current_image_path or not self.yolo_model: return
+        if not self.workspace.current_image_path: return
+        if not self.ensure_model_ready("yolo_detector", "ogkalu/manga-text-detector-yolov8s"): return
         
         for item in self.scene.items():
             if isinstance(item, BoundingBoxItem) and getattr(item, 'is_auto', False):
@@ -46,6 +47,7 @@ class WorkerProcessingMixin:
             self.ocr_worker.progress.connect(self.on_ocr_progress)
             self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
             self.ocr_worker.finished.connect(self.on_batch_ocr_finished)
+            self.ocr_worker.error.connect(self.on_ocr_error)
             self.ocr_worker.start()
         else:
             self.progress_bar.setVisible(False)
@@ -64,7 +66,8 @@ class WorkerProcessingMixin:
 
     def run_ocr_on_selected(self):
         selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
-        if not self.workspace.current_image_path or not selected_boxes or not self.mocr_model: return
+        if not self.workspace.current_image_path or not selected_boxes: return
+        if not self.ensure_model_ready("manga_ocr", "kha-white/manga-ocr-base"): return
         
         self.set_processing_lock(True)
         self.update_window_title("Reading text...")
@@ -84,6 +87,7 @@ class WorkerProcessingMixin:
         self.ocr_worker.progress.connect(self.on_ocr_progress)
         self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
         self.ocr_worker.finished.connect(self.on_batch_ocr_finished)
+        self.ocr_worker.error.connect(self.on_ocr_error)
         self.ocr_worker.start()
 
     def on_ocr_progress(self, text, box_item_ref):
@@ -99,13 +103,23 @@ class WorkerProcessingMixin:
         self.set_processing_lock(False)
         self.update_window_title()
 
+    def on_ocr_error(self, err_msg):
+        QMessageBox.critical(self, "OCR Error", str(err_msg))
+        self.progress_bar.setVisible(False)
+        self.statusBar().showMessage("Error during OCR.")
+        self.set_processing_lock(False)
+        self.update_window_title()
+
     # --- TRANSLATION LOGIC ---
     def run_translation_on_selected(self):
         engine = self.settings.value("translation_engine", "google")
         selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
         if not self.workspace.current_image_path or not selected_boxes: return
-        if engine == "nmt" and not self.nmt_model: return
         
+        if engine == "nmt":
+            repo_id = self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
+            if not self.ensure_model_ready("nmt_translator", repo_id): return
+            
         boxes_data = [(box.raw_text, box) for box in selected_boxes if box.raw_text.strip()]
         if not boxes_data:
             self.statusBar().showMessage("No OCR text found in selection.")
@@ -119,14 +133,43 @@ class WorkerProcessingMixin:
         self.progress_bar.setValue(0)
         self.statusBar().showMessage(f"Translating {len(boxes_data)} selected boxes...")
         
+        self._auto_clean_and_typeset = False
         self._start_translation_worker(engine, boxes_data)
 
-    def run_translation_on_all(self):
+    def run_translate_typeset_selected(self):
+        engine = self.settings.value("translation_engine", "google")
+        selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
+        if not self.workspace.current_image_path or not selected_boxes: 
+            return
+            
+        if engine == "nmt":
+            repo_id = self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
+            if not self.ensure_model_ready("nmt_translator", repo_id): return
+            
+        boxes_data = [(box.raw_text, box) for box in selected_boxes if box.raw_text.strip()]
+        if not boxes_data:
+            self.statusBar().showMessage("No valid OCR text found in selection to translate.")
+            return
+
+        self.set_processing_lock(True)
+        self.update_window_title("Translating & Typesetting...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.statusBar().showMessage(f"Processing {len(boxes_data)} selected boxes...")
+        
+        self._auto_clean_and_typeset = True
+        self._auto_typeset_boxes = [box for _, box in boxes_data]
+        self._start_translation_worker(engine, boxes_data)
+
+    def run_translate_typeset_all(self):
         engine = self.settings.value("translation_engine", "google")
         if not self.workspace.current_image_path: 
             return
-        if engine == "nmt" and not self.nmt_model:
-            return
+            
+        if engine == "nmt":
+            repo_id = self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
+            if not self.ensure_model_ready("nmt_translator", repo_id): return
             
         boxes_data = []
         for item in self.scene.items():
@@ -134,16 +177,18 @@ class WorkerProcessingMixin:
                 boxes_data.append((item.raw_text, item))
                 
         if not boxes_data:
-            self.statusBar().showMessage("No OCR text found to translate.")
+            self.statusBar().showMessage("No OCR text found on page to translate.")
             return
 
         self.set_processing_lock(True)
-        self.update_window_title("Translating all boxes...")
+        self.update_window_title("Translating & Typesetting All...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.statusBar().showMessage("Translating page...")
+        self.statusBar().showMessage(f"Processing {len(boxes_data)} boxes on page...")
         
+        self._auto_clean_and_typeset = True
+        self._auto_typeset_boxes = [box for _, box in boxes_data]
         self._start_translation_worker(engine, boxes_data)
 
     def _start_translation_worker(self, engine, boxes_data):
@@ -168,6 +213,15 @@ class WorkerProcessingMixin:
                 self.current_selected_box.update_typeset()
 
     def on_batch_translation_finished(self):
+        if getattr(self, '_auto_clean_and_typeset', False):
+            if hasattr(self, '_auto_typeset_boxes') and self._auto_typeset_boxes:
+                self.smart_clean_bubble(boxes=self._auto_typeset_boxes)
+                for box in self._auto_typeset_boxes:
+                    box.toggle_typeset(force_state=True)
+                    
+            self._auto_clean_and_typeset = False
+            self._auto_typeset_boxes = []
+
         self.progress_bar.setVisible(False)
         self.statusBar().showMessage("Translation Complete.")
         self.set_processing_lock(False)

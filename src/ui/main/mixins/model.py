@@ -1,8 +1,84 @@
 import gc
-from PySide6.QtWidgets import QMessageBox
-from src.core.loader_worker import ModelLoaderWorker
+from PySide6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QLabel, QProgressBar
+from PySide6.QtCore import Qt
+from huggingface_hub import scan_cache_dir
+from src.core.loader import ModelLoaderWorker
+
+class ModelProgressDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Model Manager")
+        self.setFixedSize(350, 140)
+        self.setWindowFlags(Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint)
+        self.setWindowModality(Qt.ApplicationModal)
+
+        layout = QVBoxLayout(self)
+        self.lbl_status = QLabel("Preparing...")
+        self.lbl_status.setTextFormat(Qt.RichText)
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setAlignment(Qt.AlignCenter)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+
+        layout.addWidget(self.lbl_status)
+        layout.addSpacing(15)
+        layout.addWidget(self.progress)
+
+    def set_status(self, text):
+        self.lbl_status.setText(text)
 
 class ModelManagementMixin:
+    def is_model_downloaded(self, repo_id):
+        """Checks if a model repository is already saved to the local HuggingFace cache."""
+        try:
+            hf_cache_info = scan_cache_dir()
+            for repo in hf_cache_info.repos:
+                if repo.repo_id == repo_id: return True
+            return False
+        except Exception: return False
+
+    def ensure_model_ready(self, model_key, repo_id):
+        """Checks if a model is loaded. If not, prompts the user to load or download it."""
+        if model_key == "manga_ocr" and self.mocr_model is not None: return True
+        if model_key == "yolo_detector" and self.yolo_model is not None: return True
+        if model_key == "nmt_translator" and self.nmt_model is not None: return True
+
+        if (model_key == "manga_ocr" and self.mocr_is_loading) or \
+           (model_key == "yolo_detector" and self.yolo_is_loading) or \
+           (model_key == "nmt_translator" and self.nmt_is_loading) or \
+           (model_key in self.model_load_queue):
+            QMessageBox.information(self, "Loading", "Model is currently loading. Please wait.")
+            return False
+
+        model_names = {
+            "manga_ocr": "MangaOCR (Text Recognition)",
+            "yolo_detector": "YOLOv8 Bubble Detector",
+            "nmt_translator": "Local Offline NMT"
+        }
+        name = model_names.get(model_key, model_key)
+
+        reply = QMessageBox.question(
+            self, "Model Not Loaded",
+            f"The {name} model is not loaded.\nWould you like to load it now?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            if self.is_model_downloaded(repo_id):
+                self.load_model(model_key)
+                QMessageBox.information(self, "Loading Started", f"Started loading {name} into RAM.\nPlease try your action again once it finishes.")
+            else:
+                st_reply = QMessageBox.question(
+                    self, "Model Not Downloaded",
+                    f"The model is not downloaded yet.\nWould you like to go to Settings to download it?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if st_reply == QMessageBox.Yes:
+                    tab_idx = 1 if model_key == "nmt_translator" else 0
+                    self.open_settings(tab_index=tab_idx)
+
+        return False
+
     # --- MODEL LOADING LOGIC ---
     def load_model(self, model_name):
         if model_name not in self.model_load_queue:
@@ -12,21 +88,34 @@ class ModelManagementMixin:
 
     def _process_model_queue(self):
         if self.is_loading_model_seq or not self.model_load_queue: return
-            
+
         model_name = self.model_load_queue.pop(0)
         self.is_loading_model_seq = True
+
+        if not hasattr(self, 'model_progress_dialog') or self.model_progress_dialog is None:
+            self.model_progress_dialog = ModelProgressDialog(self)
+
+        readable_names = {
+            "manga_ocr": "MangaOCR (Text Recognition)",
+            "yolo_detector": "YOLOv8 Bubble Detector",
+            "nmt_translator": "Local Offline NMT Engine"
+        }
+        r_name = readable_names.get(model_name, model_name)
+
+        self.model_progress_dialog.set_status(f"Downloading / Loading:<br><b>{r_name}</b>...<br><br>(This might take a while for the first time downloading)")
+        self.model_progress_dialog.show()
 
         if model_name == "manga_ocr": self.mocr_is_loading = True
         elif model_name == "yolo_detector": self.yolo_is_loading = True
         elif model_name == "nmt_translator": self.nmt_is_loading = True
-            
+
         self.update_window_title()
         self.model_status_changed.emit()
         self.update_button_states()
-        
+
         nmt_repo_id = self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
         loader = ModelLoaderWorker(model_name, nmt_repo_id=nmt_repo_id)
-        
+
         self.loader_threads.append(loader)
         loader.finished.connect(lambda m, n, t=loader: self.on_model_loaded(m, n, t))
         loader.error.connect(lambda n, e, t=loader: self.on_model_error(n, e, t))
@@ -41,33 +130,41 @@ class ModelManagementMixin:
             self.nmt_model, self.nmt_is_loading = model, False
 
         if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
-            
+
         self.is_loading_model_seq = False
+
+        if not self.model_load_queue and hasattr(self, 'model_progress_dialog') and self.model_progress_dialog:
+            self.model_progress_dialog.hide()
+
         self.update_window_title()
         self.update_button_states()
-        self.model_status_changed.emit() 
-        self._process_model_queue() 
+        self.model_status_changed.emit()
+        self._process_model_queue()
 
     def on_model_error(self, name, err, thread_ref):
+        if not self.model_load_queue and hasattr(self, 'model_progress_dialog') and self.model_progress_dialog:
+            self.model_progress_dialog.hide()
+
         QMessageBox.critical(self, "Model Load Error", f"Failed to load {name}:\n{err}")
+
         if name == "manga_ocr": self.mocr_is_loading = False
         elif name == "yolo_detector": self.yolo_is_loading = False
         elif name == "nmt_translator": self.nmt_is_loading = False
-            
+
         if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
-            
+
         self.is_loading_model_seq = False
         self.update_window_title()
         self.update_button_states()
         self.model_status_changed.emit()
-        self._process_model_queue() 
+        self._process_model_queue()
 
     def unload_model(self, model_name):
         if model_name == "manga_ocr": self.mocr_model = None
         elif model_name == "yolo_detector": self.yolo_model = None
         elif model_name == "nmt_translator": self.nmt_model = None
-            
-        gc.collect() 
+
+        gc.collect()
         self.update_window_title()
         self.update_button_states()
         self.model_status_changed.emit()

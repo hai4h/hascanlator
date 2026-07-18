@@ -39,9 +39,14 @@ class ImageOperationsMixin:
             self.show_edited_image()
             self.update_button_states()
 
-    def smart_clean_bubble(self):
-        selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
-        if not self.workspace.current_image_path or not selected_boxes: 
+    def smart_clean_bubble(self, boxes=None):
+        # UI signals occasionally pass `checked` (bool) as the first argument, handle it safely
+        if isinstance(boxes, bool) or boxes is None:
+            target_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
+        else:
+            target_boxes = boxes
+
+        if not self.workspace.current_image_path or not target_boxes: 
             return
             
         path = self.workspace.current_image_path
@@ -54,7 +59,7 @@ class ImageOperationsMixin:
             
         img = self.workspace.edited_images[path]
         
-        for box in selected_boxes:
+        for box in target_boxes:
             rect = box.sceneBoundingRect()
             x, y, w, h = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
             
