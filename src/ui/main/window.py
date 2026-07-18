@@ -173,16 +173,33 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         ]
         
         for key, func in bindings:
-            default_val = "Ctrl+A" if key == "keybind_select_all" else "Del" if key == "keybind_delete_box" else ""
-            sc = QShortcut(QKeySequence(self.settings.value(key, default_val)), self.view)
+            sc = QShortcut(self.view)
             sc.setContext(Qt.WidgetWithChildrenShortcut)
             sc.activated.connect(func)
             self.shortcuts[key] = sc
+            
+        self.reload_shortcuts()
 
     def reload_shortcuts(self):
+        # 1. Tally all configured keybinds
+        seq_counts = {}
+        for key in self.shortcuts.keys():
+            default_val = "Ctrl+A" if key == "keybind_select_all" else "Del" if key == "keybind_delete_box" else ""
+            val = self.settings.value(key, default_val)
+            if val:
+                seq_counts[val] = seq_counts.get(val, 0) + 1
+
+        # 2. Only apply shortcuts that are completely unique (no duplicates)
         for key, sc in self.shortcuts.items():
             default_val = "Ctrl+A" if key == "keybind_select_all" else "Del" if key == "keybind_delete_box" else ""
-            sc.setKey(QKeySequence(self.settings.value(key, default_val)))
+            val = self.settings.value(key, default_val)
+            
+            if val and seq_counts.get(val, 0) == 1:
+                sc.setKey(QKeySequence(val))
+                sc.setEnabled(True)
+            else:
+                sc.setKey(QKeySequence()) # Safely disable if empty or duplicated
+                sc.setEnabled(False)
 
     def select_all_boxes(self):
         for item in self.scene.items():

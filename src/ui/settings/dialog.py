@@ -11,6 +11,22 @@ from PySide6.QtCore import Qt, QUrl, QThread, Signal
 from PySide6.QtGui import QFont, QDesktopServices, QKeySequence
 from huggingface_hub import scan_cache_dir
 
+class AdaptiveKeySequenceEdit(QKeySequenceEdit):
+    def __init__(self, key_sequence, parent=None):
+        super().__init__(key_sequence, parent)
+        self.setMaximumSequenceLength(1)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        # Don't clear if the user is just pressing/holding down a modifier key
+        if key not in (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta, Qt.Key_AltGr, Qt.Key_unknown):
+            # Block signals temporarily so it doesn't trigger a blank save before the new key registers
+            self.blockSignals(True)
+            self.clear()
+            self.blockSignals(False)
+        super().keyPressEvent(event)
+
+
 # --- FONT DOWNLOAD WORKER ---
 class FontDownloadWorker(QThread):
     finished = Signal(bool, str)
@@ -323,9 +339,11 @@ class SettingsDialog(QDialog):
         scroll_content = QWidget()
         keybinds_layout = QFormLayout(scroll_content)
 
-        lbl_keybinds_desc = QLabel("<b>Custom Keybindings</b><br>Click the input field and press a key sequence to bind it. Clear the field to disable the shortcut. <i>Note: Bindings are active when the canvas area is in focus.</i>")
+        lbl_keybinds_desc = QLabel("<b>Custom Keybindings</b><br>Click the input field and press a key sequence to bind it. <i>Note: Bindings are active when the canvas area is in focus.</i>")
         lbl_keybinds_desc.setWordWrap(True)
         keybinds_layout.addRow(lbl_keybinds_desc)
+
+        self.keybind_edits = {}
 
         def add_header(title):
             lbl = QLabel(f"<b>{title}</b>")
@@ -333,10 +351,23 @@ class SettingsDialog(QDialog):
             keybinds_layout.addRow(lbl)
 
         def add_bind(label, setting_key, default_val=""):
-            edit = QKeySequenceEdit(QKeySequence(self.main_window.settings.value(setting_key, default_val)))
-            # The capture parameter (sk=setting_key) ensures the lambda uses the loop's current iteration string
-            edit.keySequenceChanged.connect(lambda ks, sk=setting_key: self._save_keybind(sk, ks))
-            keybinds_layout.addRow(label, edit)
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            
+            edit = AdaptiveKeySequenceEdit(QKeySequence(self.main_window.settings.value(setting_key, default_val)))
+            edit.keySequenceChanged.connect(lambda ks, sk=setting_key: self._on_keybind_changed(sk, ks))
+            
+            btn_clear = QPushButton("✕")
+            btn_clear.setFixedWidth(28)
+            btn_clear.setToolTip("Clear keybind")
+            btn_clear.clicked.connect(edit.clear)
+
+            row_layout.addWidget(edit)
+            row_layout.addWidget(btn_clear)
+
+            self.keybind_edits[setting_key] = edit
+            keybinds_layout.addRow(label, row_widget)
 
         add_header("File & Workspace")
         add_bind("Load Images:", "keybind_load_images")
@@ -392,6 +423,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.tabs)
 
         self.update_ui_state()
+        self._validate_keybinds()
 
     def _on_mirror_changed(self, state):
         is_checked = state == 2  # 2 corresponds to Qt.Checked
@@ -401,10 +433,28 @@ class SettingsDialog(QDialog):
         else:
             os.environ.pop("HF_ENDPOINT", None)
 
-    def _save_keybind(self, setting_key, key_sequence):
-        # Save sequence instantly and force the main window to update active bindings
+    def _on_keybind_changed(self, setting_key, key_sequence):
         self.main_window.settings.setValue(setting_key, key_sequence.toString())
+        self._validate_keybinds()
         self.main_window.reload_shortcuts()
+
+    def _validate_keybinds(self):
+        seq_counts = {}
+        # Count occurrences of all non-empty key sequences
+        for edit in self.keybind_edits.values():
+            ks_str = edit.keySequence().toString()
+            if ks_str:
+                seq_counts[ks_str] = seq_counts.get(ks_str, 0) + 1
+
+        # Apply red highlighting to duplicates
+        for edit in self.keybind_edits.values():
+            ks_str = edit.keySequence().toString()
+            if ks_str and seq_counts.get(ks_str, 0) > 1:
+                edit.setStyleSheet("border: 1px solid #ff6666; background-color: rgba(255, 102, 102, 0.15);")
+                edit.setToolTip("Duplicate keybind! This shortcut is disabled until resolved.")
+            else:
+                edit.setStyleSheet("")
+                edit.setToolTip("")
 
     def closeEvent(self, event):
         try:
