@@ -37,45 +37,69 @@ class ModelManagementMixin:
             return False
         except Exception: return False
 
-    def ensure_model_ready(self, model_key, repo_id):
-        """Checks if a model is loaded. If not, prompts the user to load or download it."""
-        if model_key == "manga_ocr" and self.mocr_model is not None: return True
-        if model_key == "yolo_detector" and self.yolo_model is not None: return True
-        if model_key == "nmt_translator" and self.nmt_model is not None: return True
+    def ensure_models_ready(self, required_models):
+        """Checks a list of (model_key, repo_id) tuples. Prompts once for all missing models."""
+        missing = []
+        loading = []
 
-        if (model_key == "manga_ocr" and self.mocr_is_loading) or \
-           (model_key == "yolo_detector" and self.yolo_is_loading) or \
-           (model_key == "nmt_translator" and self.nmt_is_loading) or \
-           (model_key in self.model_load_queue):
-            QMessageBox.information(self, "Loading", "Model is currently loading. Please wait.")
-            return False
+        for model_key, repo_id in required_models:
+            is_loaded = False
+            if model_key == "manga_ocr" and self.mocr_model is not None: is_loaded = True
+            elif model_key == "yolo_detector" and self.yolo_model is not None: is_loaded = True
+            elif model_key == "nmt_translator" and self.nmt_model is not None: is_loaded = True
 
-        model_names = {
-            "manga_ocr": "MangaOCR (Text Recognition)",
-            "yolo_detector": "YOLOv8 Bubble Detector",
-            "nmt_translator": "Local Offline NMT"
-        }
-        name = model_names.get(model_key, model_key)
+            if is_loaded: continue
 
-        reply = QMessageBox.question(
-            self, "Model Not Loaded",
-            f"The {name} model is not loaded.\nWould you like to load it now?",
-            QMessageBox.Yes | QMessageBox.No
-        )
+            is_loading = False
+            if (model_key == "manga_ocr" and self.mocr_is_loading) or \
+               (model_key == "yolo_detector" and self.yolo_is_loading) or \
+               (model_key == "nmt_translator" and self.nmt_is_loading) or \
+               (model_key in self.model_load_queue):
+                is_loading = True
 
-        if reply == QMessageBox.Yes:
-            if self.is_model_downloaded(repo_id):
-                self.load_model(model_key)
-                QMessageBox.information(self, "Loading Started", f"Started loading {name} into RAM.\nPlease try your action again once it finishes.")
+            if is_loading:
+                loading.append(model_key)
             else:
-                st_reply = QMessageBox.question(
-                    self, "Model Not Downloaded",
-                    f"The model is not downloaded yet.\nWould you like to go to Settings to download it?",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                if st_reply == QMessageBox.Yes:
-                    tab_idx = 1 if model_key == "nmt_translator" else 0
-                    self.open_settings(tab_index=tab_idx)
+                missing.append((model_key, repo_id))
+
+        if not missing and not loading:
+            return True
+
+        if missing:
+            model_names = {
+                "manga_ocr": "MangaOCR (Text Recognition)",
+                "yolo_detector": "YOLOv8 Bubble Detector",
+                "nmt_translator": "Local Offline NMT Engine"
+            }
+
+            names_str = "\n".join([f"- {model_names.get(k, k)}" for k, r in missing])
+
+            reply = QMessageBox.question(
+                self, "Models Not Loaded",
+                f"The following required models are not loaded:\n{names_str}\n\nWould you like to load them now?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                not_downloaded = [k for k, r in missing if not self.is_model_downloaded(r)]
+                downloaded = [k for k, r in missing if self.is_model_downloaded(r)]
+
+                for k in downloaded:
+                    self.load_model(k)
+
+                if not_downloaded:
+                    st_reply = QMessageBox.question(
+                        self, "Models Not Downloaded",
+                        f"Some models are not downloaded yet.\nWould you like to go to Settings to download them?",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    if st_reply == QMessageBox.Yes:
+                        tab_idx = 1 if len(not_downloaded) == 1 and not_downloaded[0] == "nmt_translator" else 0
+                        self.open_settings(tab_index=tab_idx)
+                elif downloaded:
+                    QMessageBox.information(self, "Loading Started", "Started loading models into RAM.\nPlease try your action again once they finish.")
+        elif loading:
+            QMessageBox.information(self, "Loading", "Required models are currently loading. Please wait.")
 
         return False
 
