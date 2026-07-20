@@ -46,57 +46,136 @@ class ImageOperationsMixin:
         else:
             target_boxes = boxes
 
-        if not self.workspace.current_image_path or not target_boxes: 
+        if not self.workspace.current_image_path or not target_boxes:
             return
-            
+
         path = self.workspace.current_image_path
-        
+
         # 1. Save Undo State
         current_img = self.workspace.edited_images[path].copy()
         self.workspace.undo_stacks[path].append(current_img)
         if len(self.workspace.undo_stacks[path]) > 5:
             self.workspace.undo_stacks[path].pop(0)
-            
+
         img = self.workspace.edited_images[path]
-        
+
         for box in target_boxes:
             rect = box.sceneBoundingRect()
             x, y, w, h = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
-            
+
             # 2. Boundary Safety Check
             x, y = max(0, x), max(0, y)
             w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
             if w <= 0 or h <= 0: continue
-            
+
             roi = img[y:y+h, x:x+w]
-            
+
             # 3. Smart Masking
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
             _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            
+
             contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
+
             clean_mask = np.zeros_like(gray)
-            
+
             for contour in contours:
                 cx, cy, cw, ch = cv2.boundingRect(contour)
                 margin = 3
                 touches_edge = (cx <= margin) or (cy <= margin) or (cx + cw >= w - margin) or (cy + ch >= h - margin)
                 area = cv2.contourArea(contour)
                 too_huge = area > (w * h * 0.5)
-                
+
                 if not touches_edge and not too_huge:
                     cv2.drawContours(clean_mask, [contour], -1, 255, thickness=cv2.FILLED)
-            
+
             # 4. Aggressive Mask Expansion
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
             clean_mask = cv2.dilate(clean_mask, kernel, iterations=2)
-            
+
             # 5. Erase text
             cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_TELEA)
             img[y:y+h, x:x+w] = cleaned_roi
-        
-        # 6. Save and Render
+
+        # 6. Auto-Expand Bounding Boxes to fill the clean bubble
+        gray_clean = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Threshold: 220 to 255 is considered "white space" inside the bubble
+        _, thresh = cv2.threshold(gray_clean, 220, 255, cv2.THRESH_BINARY)
+        max_h, max_w = thresh.shape
+
+        from PySide6.QtCore import QRectF
+
+        for box in target_boxes:
+            rect = box.sceneBoundingRect()
+            bx, by, bw, bh = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
+
+            curr_x1, curr_y1 = max(0, bx), max(0, by)
+            curr_x2, curr_y2 = min(max_w, bx + bw), min(max_h, by + bh)
+
+            can_exp_left = can_exp_right = can_exp_top = can_exp_bottom = True
+            step = 2
+            max_dim = max(bw, bh) * 3
+            tolerance = 0.02 # Allow 2% noise (handles slight screentones/artifacts)
+
+            while can_exp_left or can_exp_right or can_exp_top or can_exp_bottom:
+                if can_exp_left:
+                    nx = max(0, curr_x1 - step)
+                    if nx == curr_x1 or (curr_x2 - nx) > max_dim:
+                        can_exp_left = False
+                    else:
+                        edge = thresh[curr_y1:curr_y2, nx:curr_x1]
+                        if np.sum(edge == 0) / max(1, edge.size) > tolerance:
+                            can_exp_left = False
+                        else:
+                            curr_x1 = nx
+
+                if can_exp_right:
+                    nx = min(max_w, curr_x2 + step)
+                    if nx == curr_x2 or (nx - curr_x1) > max_dim:
+                        can_exp_right = False
+                    else:
+                        edge = thresh[curr_y1:curr_y2, curr_x2:nx]
+                        if np.sum(edge == 0) / max(1, edge.size) > tolerance:
+                            can_exp_right = False
+                        else:
+                            curr_x2 = nx
+
+                if can_exp_top:
+                    ny = max(0, curr_y1 - step)
+                    if ny == curr_y1 or (curr_y2 - ny) > max_dim:
+                        can_exp_top = False
+                    else:
+                        edge = thresh[ny:curr_y1, curr_x1:curr_x2]
+                        if np.sum(edge == 0) / max(1, edge.size) > tolerance:
+                            can_exp_top = False
+                        else:
+                            curr_y1 = ny
+
+                if can_exp_bottom:
+                    ny = min(max_h, curr_y2 + step)
+                    if ny == curr_y2 or (ny - curr_y1) > max_dim:
+                        can_exp_bottom = False
+                    else:
+                        edge = thresh[curr_y2:ny, curr_x1:curr_x2]
+                        if np.sum(edge == 0) / max(1, edge.size) > tolerance:
+                            can_exp_bottom = False
+                        else:
+                            curr_y2 = ny
+
+            # Add padding so Typeset Text doesn't touch the bubble walls
+            pad = 6
+            final_x1, final_y1 = curr_x1 + pad, curr_y1 + pad
+            final_x2, final_y2 = curr_x2 - pad, curr_y2 - pad
+
+            # Failsafe: Ensure it didn't collapse on itself
+            if final_x2 <= final_x1: final_x1, final_x2 = curr_x1, curr_x2
+            if final_y2 <= final_y1: final_y1, final_y2 = curr_y1, curr_y2
+
+            box.setRect(QRectF(final_x1, final_y1, final_x2 - final_x1, final_y2 - final_y1))
+            if box.is_typeset:
+                box.update_typeset()
+
+        # 7. Save and Render
         self.workspace.edited_images[path] = img
         self.show_edited_image()
         self.update_button_states()
@@ -106,7 +185,7 @@ class ImageOperationsMixin:
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.toggle_typeset()
-        
+
     def set_text_alignment(self, align):
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
@@ -157,7 +236,7 @@ class ImageOperationsMixin:
             if isinstance(box, BoundingBoxItem):
                 box.font_family = family
                 if box.is_typeset: box.update_typeset()
-                
+
         # Maintain list of recent fonts
         if hasattr(self, 'recent_fonts'):
             if family in self.recent_fonts:
@@ -165,7 +244,7 @@ class ImageOperationsMixin:
             self.recent_fonts.insert(0, family)
             if len(self.recent_fonts) > 5:
                 self.recent_fonts = self.recent_fonts[:5]
-                
+
         self.refresh_font_combo(current_font=family)
 
     def set_text_font_size_exact(self, size):
@@ -202,7 +281,7 @@ class ImageOperationsMixin:
         """Applies global font settings from QSettings to a specific box."""
         box.font_family = self.settings.value("default_font_family", "sans-serif")
         box.font_size = int(self.settings.value("default_font_size", 16))
-        
+
         # Determine boolean value safely from QSettings strings ("true"/"false")
         def _get_bool(key, default=False):
             val = self.settings.value(key, default)
@@ -219,5 +298,5 @@ class ImageOperationsMixin:
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 self.apply_default_font_settings(box)
-                if box.is_typeset: 
+                if box.is_typeset:
                     box.update_typeset()
