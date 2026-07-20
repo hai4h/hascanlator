@@ -51,6 +51,7 @@ class SettingsDialog(QDialog):
         self.main_window = main_window
         self.setWindowTitle("Settings & Model Manager")
         self.resize(650, 600)
+        self.setAttribute(Qt.WA_DeleteOnClose)
 
         self.main_window.model_status_changed.connect(self.update_ui_state)
 
@@ -354,10 +355,10 @@ class SettingsDialog(QDialog):
             row_widget = QWidget()
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            
+
             edit = AdaptiveKeySequenceEdit(QKeySequence(self.main_window.settings.value(setting_key, default_val)))
             edit.keySequenceChanged.connect(lambda ks, sk=setting_key: self._on_keybind_changed(sk, ks))
-            
+
             btn_clear = QPushButton("✕")
             btn_clear.setFixedWidth(28)
             btn_clear.setToolTip("Clear keybind")
@@ -457,10 +458,6 @@ class SettingsDialog(QDialog):
                 edit.setToolTip("")
 
     def closeEvent(self, event):
-        try:
-            self.main_window.model_status_changed.disconnect(self.update_ui_state)
-        except Exception:
-            pass
         super().closeEvent(event)
 
     # --- FONT DOWNLOADER HELPERS ---

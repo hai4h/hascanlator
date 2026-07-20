@@ -13,5 +13,5 @@ Half-A$$ Scanlator is a local desktop application designed to streamline the man
 
 ## Installation
 1. Clone the repository.
-2. Install dependencies: `pip install -r requirements.txt` or sequently run every lines in `pip-install.txt`
+2. Install dependencies: sequently run every lines in `pip-install.txt` (recommended) or `pip install -r requirements.txt` 
 3. Run the application: `python run.py`
