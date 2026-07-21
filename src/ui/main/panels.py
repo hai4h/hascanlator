@@ -1,5 +1,20 @@
-from PySide6.QtWidgets import QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QLabel
+from PySide6.QtWidgets import QDockWidget, QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QLabel, QListWidget
 from PySide6.QtCore import Qt
+
+class HistoryDockWidget(QDockWidget):
+    def __init__(self, parent=None):
+        super().__init__("History Log", parent)
+
+        self.setMinimumWidth(100)
+        self.setMaximumWidth(150)
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.history_list = QListWidget()
+        self.history_list.setAlternatingRowColors(True)
+        self.history_list.setStyleSheet("QListWidget::item { padding: 4px; border-bottom: 1px solid #3c3c3c; }")
+        self.setWidget(self.history_list)
 
 class EditorDockWidget(QDockWidget):
     def __init__(self, parent=None):

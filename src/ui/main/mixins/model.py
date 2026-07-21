@@ -9,7 +9,7 @@ class ModelProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Model Manager")
         self.setFixedSize(350, 140)
-        self.setWindowFlags(Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint)
+        self.setWindowFlags(Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint | Qt.WindowStaysOnTopHint)
         self.setWindowModality(Qt.ApplicationModal)
 
         layout = QVBoxLayout(self)
@@ -128,6 +128,8 @@ class ModelManagementMixin:
 
         self.model_progress_dialog.set_status(f"Downloading / Loading:<br><b>{r_name}</b>...<br><br>(This might take a while for the first time downloading)")
         self.model_progress_dialog.show()
+        self.model_progress_dialog.raise_()
+        self.model_progress_dialog.activateWindow()
 
         if model_name == "manga_ocr": self.mocr_is_loading = True
         elif model_name == "yolo_detector": self.yolo_is_loading = True

@@ -100,6 +100,7 @@ class WorkerProcessingMixin:
             self.statusBar().showMessage("Detection Complete.")
             self.set_processing_lock(False)
             self.update_window_title()
+            self.commit_history("Auto Detect")
 
         self.save_current_page_state()
 
@@ -148,6 +149,7 @@ class WorkerProcessingMixin:
         self.statusBar().showMessage("Processing Complete.")
         self.set_processing_lock(False)
         self.update_window_title()
+        self.commit_history("Batch OCR")
 
         # Resume chained workflow if another action triggered OCR on-the-fly
         if hasattr(self, '_pending_post_ocr_action') and self._pending_post_ocr_action:
@@ -299,6 +301,7 @@ class WorkerProcessingMixin:
         self.set_processing_lock(False)
         self.update_window_title()
         self.save_current_page_state()
+        self.commit_history("Batch Translate & Typeset")
 
     def on_translation_error(self, err_msg):
         QMessageBox.critical(self, "Translation Error", str(err_msg))

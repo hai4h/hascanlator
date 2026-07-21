@@ -15,7 +15,7 @@ from src.ui.canvas.items import BoundingBoxItem
 
 from src.ui.settings.dialog import SettingsDialog
 
-from src.ui.main.panels import EditorDockWidget
+from src.ui.main.panels import EditorDockWidget, HistoryDockWidget
 from src.ui.main.toolbar import MainToolbar
 from src.ui.main.navigation import BottomNavigation
 from src.ui.main.typeset import TypesetToolBar
@@ -36,10 +36,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.settings = QSettings(config_path, QSettings.IniFormat)
         # populate config.ini with all defaults immediately
         self._initialize_config_defaults()
-        
+
         if self.settings.value("use_hf_mirror", False, type=bool):
             os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-            
+
         self.workspace = WorkspaceManager()
 
         self.current_image_item = None
@@ -69,15 +69,19 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.update_window_title()
         self.update_button_states()
 
+        # Load local fonts on boot
+        self.reload_custom_fonts()
+
+        # Delay auto-loading models by 500ms to ensure the main window renders first
+        QTimer.singleShot(500, self._auto_load_models_on_startup)
+
+    def _auto_load_models_on_startup(self):
         if self.settings.value("auto_load_mocr", False, type=bool):
             self.load_model("manga_ocr")
         if self.settings.value("auto_load_yolo", False, type=bool):
             self.load_model("yolo_detector")
         if self.settings.value("auto_load_nmt", False, type=bool):
             self.load_model("nmt_translator")
-
-        # Load local fonts on boot
-        self.reload_custom_fonts()
 
     def _initialize_config_defaults(self):
         """Populates config.ini with all default settings so they are visible and editable by the user."""
@@ -98,7 +102,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "default_font_underline": False,
             "default_font_strikeout": False,
             "typeset_toolbar_pos": "right",
-            
+
             # Keybind Defaults
             "keybind_select_all": "Ctrl+A",
             "keybind_delete_box": "Del",
@@ -139,7 +143,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
     def _setup_shortcuts(self):
         self.shortcuts = {}
-        
+
         bindings = [
             ("keybind_load_images", self.load_images_dialog),
             ("keybind_reset_workspace", self.reset_workspace),
@@ -171,13 +175,13 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             ("keybind_indent_up", lambda: self.set_text_indent(5)),
             ("keybind_indent_down", lambda: self.set_text_indent(-5)),
         ]
-        
+
         for key, func in bindings:
             sc = QShortcut(self.view)
             sc.setContext(Qt.WidgetWithChildrenShortcut)
             sc.activated.connect(func)
             self.shortcuts[key] = sc
-            
+
         self.reload_shortcuts()
 
     def reload_shortcuts(self):
@@ -193,7 +197,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         for key, sc in self.shortcuts.items():
             default_val = "Ctrl+A" if key == "keybind_select_all" else "Del" if key == "keybind_delete_box" else ""
             val = self.settings.value(key, default_val)
-            
+
             if val and seq_counts.get(val, 0) == 1:
                 sc.setKey(QKeySequence(val))
                 sc.setEnabled(True)
@@ -217,6 +221,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.nav = BottomNavigation(self)
         self.right_dock = EditorDockWidget(self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.right_dock)
+
+        self.history_dock = HistoryDockWidget(self)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.history_dock)
 
         center_area = QWidget()
         center_layout = QVBoxLayout(center_area)
@@ -293,7 +300,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.right_dock.btn_translate_box.clicked.connect(self.run_translation_on_selected)
         self.right_dock.btn_trans_type_sel.clicked.connect(self.run_translate_typeset_selected)
         self.right_dock.btn_trans_type_all.clicked.connect(self.run_translate_typeset_all)
-        
+
+        self.history_dock.history_list.itemClicked.connect(self.on_history_item_clicked)
+
         # --- TYPESET SIGNALS ---
         self.typeset_toolbar.btn_clean_bubble.clicked.connect(self.smart_clean_bubble)
         self.typeset_toolbar.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
@@ -383,21 +392,23 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         # Toolbar State
         self.toolbar.btn_peek.setEnabled(has_image)
-        if has_image and len(self.workspace.undo_stacks.get(self.workspace.current_image_path, [])) > 0:
+
+        path = self.workspace.current_image_path
+        if has_image and path and path in self.workspace.history and len(self.workspace.history[path]) > 1:
             self.toolbar.btn_undo.setEnabled(True)
         else:
             self.toolbar.btn_undo.setEnabled(False)
 
         self.toolbar.btn_auto_detect.setEnabled(not self.is_processing and has_image)
         self.toolbar.btn_auto_detect.setText("Auto Detect\n(Whole Page)")
-            
+
         # OCR / Trans State
         self.right_dock.btn_run_ocr.setEnabled(not self.is_processing and has_image and has_any_box)
-        
+
         self.right_dock.btn_translate_box.setEnabled(not self.is_processing and has_image and has_any_box)
         self.right_dock.btn_trans_type_sel.setEnabled(not self.is_processing and has_image and has_any_box)
         self.right_dock.btn_trans_type_all.setEnabled(not self.is_processing and has_image)
-        
+
         self.right_dock.btn_delete_box.setEnabled(has_any_box)
 
         # Lock contextual toolbar if scanning is happening
@@ -450,7 +461,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             cv_img = self.imread_utf8(path)
             self.workspace.original_images[path] = cv_img.copy()
             self.workspace.edited_images[path] = cv_img.copy()
-            self.workspace.undo_stacks[path] = []
+            self.workspace.history[path] = []
 
         pixmap = self.cv2_to_qpixmap(self.workspace.edited_images[path])
         self.current_image_item = QGraphicsPixmapItem(pixmap)
@@ -483,17 +494,21 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 if b_data.get('is_typeset', False):
                     box.toggle_typeset(force_state=True)
 
+        if path not in self.workspace.history or not self.workspace.history[path]:
+            self.commit_history("Initial State")
+        else:
+            self._refresh_history_ui()
+
         self.update_window_title()
         self.update_button_states()
 
         if not self.workspace.is_page_processed(path) and self.toolbar.chk_auto_process.isChecked() and self.yolo_model:
             QTimer.singleShot(100, self.run_auto_detect)
 
-    def save_current_page_state(self):
-        if not self.workspace.current_image_path: return
-        boxes = [{
-            'rect': item.rect(), 'pos': item.scenePos(), 'is_auto': item.is_auto,
-            'raw_text': item.raw_text, 'translated_text': item.translated_text,
+    def get_current_boxes_state(self):
+        return [{
+            'rect': item.rect(), 'pos': item.scenePos(), 'is_auto': getattr(item, 'is_auto', False),
+            'raw_text': getattr(item, 'raw_text', ''), 'translated_text': getattr(item, 'translated_text', ''),
             'is_typeset': getattr(item, 'is_typeset', False),
             'align': getattr(item, 'align', Qt.AlignCenter),
             'valign': getattr(item, 'valign', Qt.AlignVCenter),
@@ -505,9 +520,89 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'is_italic': getattr(item, 'is_italic', False),
             'is_underline': getattr(item, 'is_underline', False),
             'is_strikeout': getattr(item, 'is_strikeout', False)
-
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
+
+    def save_current_page_state(self):
+        if not self.workspace.current_image_path: return
+        boxes = self.get_current_boxes_state()
         self.workspace.save_page_state(self.workspace.current_image_path, boxes)
+
+    def commit_history(self, desc):
+        path = self.workspace.current_image_path
+        if not path: return
+
+        img = self.workspace.edited_images[path].copy()
+        boxes = self.get_current_boxes_state()
+
+        if path not in self.workspace.history:
+            self.workspace.history[path] = []
+
+        self.workspace.history[path].append({
+            'desc': desc,
+            'image': img,
+            'boxes': boxes
+        })
+
+        self._refresh_history_ui()
+        self.update_button_states()
+
+    def _refresh_history_ui(self):
+        path = self.workspace.current_image_path
+        self.history_dock.history_list.blockSignals(True)
+        self.history_dock.history_list.clear()
+        if path and path in self.workspace.history:
+            for idx, step in enumerate(self.workspace.history[path]):
+                self.history_dock.history_list.addItem(f"{idx + 1}. {step['desc']}")
+            self.history_dock.history_list.setCurrentRow(len(self.workspace.history[path]) - 1)
+        self.history_dock.history_list.blockSignals(False)
+
+    def on_history_item_clicked(self, item):
+        idx = self.history_dock.history_list.row(item)
+        self.load_history_step(idx)
+
+    def load_history_step(self, index):
+        path = self.workspace.current_image_path
+        if not path or path not in self.workspace.history: return
+        history_list = self.workspace.history[path]
+        if index < 0 or index >= len(history_list): return
+
+        self.set_processing_lock(True)
+        step = history_list[index]
+        self.workspace.edited_images[path] = step['image'].copy()
+
+        # Truncate history
+        self.workspace.history[path] = history_list[:index+1]
+
+        # Redraw Image
+        self.scene.clear()
+        pixmap = self.cv2_to_qpixmap(self.workspace.edited_images[path])
+        self.current_image_item = QGraphicsPixmapItem(pixmap)
+        self.scene.addItem(self.current_image_item)
+        self.scene.setSceneRect(QRectF(pixmap.rect()))
+
+        # Redraw Boxes
+        for b_data in step['boxes']:
+            box = BoundingBoxItem(b_data['rect'], is_auto=b_data['is_auto'])
+            box.setPos(b_data['pos'])
+            box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
+            box.align = b_data.get('align', Qt.AlignCenter)
+            box.valign = b_data.get('valign', Qt.AlignVCenter)
+            box.indent = b_data.get('indent', 5)
+            box.line_spacing = b_data.get('line_spacing', 1.0)
+            box.font_family = b_data.get('font_family', "sans-serif")
+            box.font_size = b_data.get('font_size', 16)
+            box.is_bold = b_data.get('is_bold', False)
+            box.is_italic = b_data.get('is_italic', False)
+            box.is_underline = b_data.get('is_underline', False)
+            box.is_strikeout = b_data.get('is_strikeout', False)
+
+            self.scene.addItem(box)
+            if b_data.get('is_typeset', False):
+                box.toggle_typeset(force_state=True)
+
+        self._refresh_history_ui()
+        self.set_processing_lock(False)
+        self.update_button_states()
 
     def prev_image(self):
         if not self.is_processing:
@@ -580,11 +675,16 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.scene.addItem(box)
         self.scene.clearSelection()
         box.setSelected(True)
+        self.commit_history("Add Manual Box")
 
     def delete_selected_box(self):
+        changed = False
         for item in self.scene.selectedItems():
             if isinstance(item, BoundingBoxItem):
                 self.scene.removeItem(item)
+                changed = True
+        if changed:
+            self.commit_history("Delete Box(es)")
 
     # --- FONT MANAGEMENT ---
     def open_settings(self, tab_index=0):

@@ -25,19 +25,24 @@ class ImageOperationsMixin:
         path = self.workspace.current_image_path
         if path and path in self.workspace.original_images:
             self.current_image_item.setPixmap(self.cv2_to_qpixmap(self.workspace.original_images[path]))
+            for item in self.scene.items():
+                if isinstance(item, BoundingBoxItem):
+                    item.setVisible(False)
 
     def show_edited_image(self):
         path = self.workspace.current_image_path
         if path and path in self.workspace.edited_images:
             self.current_image_item.setPixmap(self.cv2_to_qpixmap(self.workspace.edited_images[path]))
+            for item in self.scene.items():
+                if isinstance(item, BoundingBoxItem):
+                    item.setVisible(True)
 
     def undo_edit(self):
         path = self.workspace.current_image_path
-        if path and self.workspace.undo_stacks.get(path):
-            last_img = self.workspace.undo_stacks[path].pop()
-            self.workspace.edited_images[path] = last_img
-            self.show_edited_image()
-            self.update_button_states()
+        if path and path in self.workspace.history:
+            idx = len(self.workspace.history[path]) - 2
+            if idx >= 0:
+                self.load_history_step(idx)
 
     def smart_clean_bubble(self, boxes=None):
         # UI signals occasionally pass `checked` (bool) as the first argument, handle it safely
@@ -51,13 +56,7 @@ class ImageOperationsMixin:
 
         path = self.workspace.current_image_path
 
-        # 1. Save Undo State
-        current_img = self.workspace.edited_images[path].copy()
-        self.workspace.undo_stacks[path].append(current_img)
-        if len(self.workspace.undo_stacks[path]) > 5:
-            self.workspace.undo_stacks[path].pop(0)
-
-        img = self.workspace.edited_images[path]
+        img = self.workspace.edited_images[path].copy()
 
         for box in target_boxes:
             rect = box.sceneBoundingRect()
@@ -179,63 +178,80 @@ class ImageOperationsMixin:
         self.workspace.edited_images[path] = img
         self.show_edited_image()
         self.update_button_states()
+        self.commit_history("Smart Clean Bubble")
 
     # --- TYPESETTING CONTROLS ---
     def toggle_typeset_view(self):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.toggle_typeset()
+                changed = True
+        if changed: self.commit_history("Toggle Typeset")
 
     def set_text_alignment(self, align):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.align = align
-                if box.is_typeset:
-                    box.update_typeset()
+                if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Set Text Alignment")
 
     def set_text_indent(self, delta):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.indent = max(0, box.indent + delta)
-                if box.is_typeset:
-                    box.update_typeset()
+                if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Change Indent")
 
     def set_text_valignment(self, valign):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.valign = valign
-                if box.is_typeset:
-                    box.update_typeset()
+                if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Set Vertical Alignment")
 
     def set_text_line_spacing(self, delta):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
-                # Round to 1 decimal place to prevent floating point errors (e.g. 1.1 + 0.1 = 1.200000000002)
                 box.line_spacing = max(0.5, round(box.line_spacing + delta, 1))
-                if box.is_typeset:
-                    box.update_typeset()
+                if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Change Line Spacing")
 
     def reset_text_alignment(self):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.align = Qt.AlignCenter
                 box.valign = Qt.AlignVCenter
-                if box.is_typeset:
-                    box.update_typeset()
+                if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Reset Alignment")
 
     def reset_text_spacing(self):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.indent = 5
                 box.line_spacing = 1.0
-                if box.is_typeset:
-                    box.update_typeset()
+                if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Reset Spacing")
 
     def set_text_font_family(self, family):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.font_family = family
                 if box.is_typeset: box.update_typeset()
+                changed = True
 
         # Maintain list of recent fonts
         if hasattr(self, 'recent_fonts'):
@@ -246,36 +262,52 @@ class ImageOperationsMixin:
                 self.recent_fonts = self.recent_fonts[:5]
 
         self.refresh_font_combo(current_font=family)
+        if changed: self.commit_history("Change Font Family")
 
     def set_text_font_size_exact(self, size):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.font_size = max(1, size)
                 if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Change Font Size")
 
     def toggle_text_bold(self):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.is_bold = not box.is_bold
                 if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Toggle Bold")
 
     def toggle_text_italic(self):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.is_italic = not box.is_italic
                 if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Toggle Italic")
 
     def toggle_text_underline(self):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.is_underline = not box.is_underline
                 if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Toggle Underline")
 
     def toggle_text_strikeout(self):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 box.is_strikeout = not box.is_strikeout
                 if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Toggle Strikeout")
 
     def apply_default_font_settings(self, box):
         """Applies global font settings from QSettings to a specific box."""
@@ -295,8 +327,11 @@ class ImageOperationsMixin:
         box.is_strikeout = _get_bool("default_font_strikeout")
 
     def reset_text_font(self):
+        changed = False
         for box in self.scene.selectedItems():
             if isinstance(box, BoundingBoxItem):
                 self.apply_default_font_settings(box)
                 if box.is_typeset:
                     box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Reset Font")

@@ -6,11 +6,11 @@ class WorkspaceManager:
         self.image_paths = []
         self.current_img_index = -1
         self.page_data_cache = {}
-        
+
         # --- Image State Managers ---
         self.original_images = {} # path -> cv2 numpy array
         self.edited_images = {}   # path -> cv2 numpy array
-        self.undo_stacks = {}     # path -> list of cv2 numpy arrays
+        self.history = {}         # path -> list of dicts
 
     def load_images(self, file_paths):
         self.image_paths = sorted(file_paths)
@@ -23,7 +23,7 @@ class WorkspaceManager:
         self.page_data_cache.clear()
         self.original_images.clear()
         self.edited_images.clear()
-        self.undo_stacks.clear()
+        self.history.clear()
 
     @property
     def has_images(self):

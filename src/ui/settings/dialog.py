@@ -370,7 +370,7 @@ class SettingsDialog(QDialog):
             self.keybind_edits[setting_key] = edit
             keybinds_layout.addRow(label, row_widget)
 
-        add_header("File & Workspace")
+        add_header("File and Workspace")
         add_bind("Load Images:", "keybind_load_images")
         add_bind("Reset Workspace:", "keybind_reset_workspace")
         add_bind("Open Settings:", "keybind_open_settings")
@@ -379,21 +379,21 @@ class SettingsDialog(QDialog):
         add_bind("Next Page:", "keybind_next_page")
         add_bind("Previous Page:", "keybind_prev_page")
 
-        add_header("Canvas & Selection")
+        add_header("Canvas and Selection")
         add_bind("Select All Boxes:", "keybind_select_all", "Ctrl+A")
         add_bind("Delete Selected Box(es):", "keybind_delete_box", "Del")
         add_bind("Add Box (Manual):", "keybind_add_box")
         add_bind("Undo Image Edit:", "keybind_undo_edit")
 
-        add_header("AI & Processing")
+        add_header("AI and Processing")
         add_bind("Auto Detect Text (YOLO):", "keybind_auto_detect")
         add_bind("Run OCR on Selected:", "keybind_run_ocr")
         add_bind("Translate Selected Box:", "keybind_translate_box")
-        add_bind("Translate & Typeset Selected:", "keybind_trans_type_sel")
-        add_bind("Translate & Typeset All:", "keybind_trans_type_all")
+        add_bind("Translate + Typeset Selected:", "keybind_trans_type_sel")
+        add_bind("Translate + Typeset All:", "keybind_trans_type_all")
         add_bind("Smart Clean Bubble:", "keybind_smart_clean")
 
-        add_header("Typesetting & Formatting")
+        add_header("Typesetting and Formatting")
         add_bind("Toggle Typeset Visibility:", "keybind_toggle_typeset")
         add_bind("Toggle Bold:", "keybind_bold")
         add_bind("Toggle Italic:", "keybind_italic")
