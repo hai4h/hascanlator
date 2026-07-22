@@ -11,6 +11,7 @@ class WorkspaceManager:
         self.original_images = {} # path -> cv2 numpy array
         self.edited_images = {}   # path -> cv2 numpy array
         self.history = {}         # path -> list of dicts
+        self.history_indices = {} # path -> int
 
     def load_images(self, file_paths):
         self.image_paths = sorted(file_paths)
@@ -24,6 +25,7 @@ class WorkspaceManager:
         self.original_images.clear()
         self.edited_images.clear()
         self.history.clear()
+        self.history_indices.clear()
 
     @property
     def has_images(self):

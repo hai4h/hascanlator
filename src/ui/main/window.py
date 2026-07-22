@@ -113,6 +113,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "keybind_prev_page": "",
             "keybind_add_box": "",
             "keybind_undo_edit": "",
+            "keybind_redo_edit": "",
             "keybind_auto_detect": "",
             "keybind_run_ocr": "",
             "keybind_translate_box": "",
@@ -154,6 +155,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             ("keybind_delete_box", self.delete_selected_box),
             ("keybind_add_box", self.add_test_box),
             ("keybind_undo_edit", self.undo_edit),
+            ("keybind_redo_edit", self.redo_edit),
             ("keybind_auto_detect", self.run_auto_detect),
             ("keybind_run_ocr", self.run_ocr_on_selected),
             ("keybind_translate_box", self.run_translation_on_selected),
@@ -279,6 +281,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.toolbar.btn_peek.pressed.connect(self.show_original_image)
         self.toolbar.btn_peek.released.connect(self.show_edited_image)
         self.toolbar.btn_undo.clicked.connect(self.undo_edit)
+        if hasattr(self.toolbar, 'btn_redo'):
+            self.toolbar.btn_redo.clicked.connect(self.redo_edit)
 
         self.toolbar.btn_auto_detect.clicked.connect(self.run_auto_detect)
         self.toolbar.btn_add_box.clicked.connect(self.add_test_box)
@@ -394,10 +398,13 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.toolbar.btn_peek.setEnabled(has_image)
 
         path = self.workspace.current_image_path
-        if has_image and path and path in self.workspace.history and len(self.workspace.history[path]) > 1:
-            self.toolbar.btn_undo.setEnabled(True)
-        else:
-            self.toolbar.btn_undo.setEnabled(False)
+
+        can_undo = has_image and path and path in self.workspace.history_indices and self.workspace.history_indices[path] > 0
+        self.toolbar.btn_undo.setEnabled(can_undo)
+
+        can_redo = has_image and path and path in self.workspace.history_indices and self.workspace.history_indices[path] < len(self.workspace.history.get(path, [])) - 1
+        if hasattr(self.toolbar, 'btn_redo'):
+            self.toolbar.btn_redo.setEnabled(can_redo)
 
         self.toolbar.btn_auto_detect.setEnabled(not self.is_processing and has_image)
         self.toolbar.btn_auto_detect.setText("Auto Detect\n(Whole Page)")
@@ -445,6 +452,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.current_image_item = None
         self.scene.clear()
         self.nav.update_labels(0, 0)
+        self.history_dock.history_list.clear()
         self.update_window_title()
         self.update_button_states()
         self.statusBar().showMessage("Workspace Reset")
@@ -462,6 +470,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.workspace.original_images[path] = cv_img.copy()
             self.workspace.edited_images[path] = cv_img.copy()
             self.workspace.history[path] = []
+            self.workspace.history_indices[path] = -1
 
         pixmap = self.cv2_to_qpixmap(self.workspace.edited_images[path])
         self.current_image_item = QGraphicsPixmapItem(pixmap)
@@ -536,12 +545,20 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         if path not in self.workspace.history:
             self.workspace.history[path] = []
+            self.workspace.history_indices[path] = -1
+
+        # If we are not at the end of the history stack, truncate the future steps before appending
+        curr_idx = self.workspace.history_indices[path]
+        if curr_idx < len(self.workspace.history[path]) - 1:
+            self.workspace.history[path] = self.workspace.history[path][:curr_idx + 1]
 
         self.workspace.history[path].append({
             'desc': desc,
             'image': img,
             'boxes': boxes
         })
+
+        self.workspace.history_indices[path] = len(self.workspace.history[path]) - 1
 
         self._refresh_history_ui()
         self.update_button_states()
@@ -551,9 +568,20 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.history_dock.history_list.blockSignals(True)
         self.history_dock.history_list.clear()
         if path and path in self.workspace.history:
+            curr_idx = self.workspace.history_indices.get(path, -1)
             for idx, step in enumerate(self.workspace.history[path]):
                 self.history_dock.history_list.addItem(f"{idx + 1}. {step['desc']}")
-            self.history_dock.history_list.setCurrentRow(len(self.workspace.history[path]) - 1)
+
+                # Visually indicate future states (redo-able steps)
+                if idx > curr_idx:
+                    item = self.history_dock.history_list.item(idx)
+                    item.setForeground(Qt.gray)
+                    f = item.font()
+                    f.setItalic(True)
+                    item.setFont(f)
+
+            if curr_idx >= 0:
+                self.history_dock.history_list.setCurrentRow(curr_idx)
         self.history_dock.history_list.blockSignals(False)
 
     def on_history_item_clicked(self, item):
@@ -570,8 +598,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         step = history_list[index]
         self.workspace.edited_images[path] = step['image'].copy()
 
-        # Truncate history
-        self.workspace.history[path] = history_list[:index+1]
+        # Update current index (Do NOT truncate history yet)
+        self.workspace.history_indices[path] = index
 
         # Redraw Image
         self.scene.clear()
@@ -675,16 +703,16 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.scene.addItem(box)
         self.scene.clearSelection()
         box.setSelected(True)
-        self.commit_history("Add Manual Box")
+        self.commit_history("Add Box (Manual)")
 
     def delete_selected_box(self):
-        changed = False
+        count = 0
         for item in self.scene.selectedItems():
             if isinstance(item, BoundingBoxItem):
                 self.scene.removeItem(item)
-                changed = True
-        if changed:
-            self.commit_history("Delete Box(es)")
+                count += 1
+        if count > 0:
+            self.commit_history(f"Delete {count} Box(es)")
 
     # --- FONT MANAGEMENT ---
     def open_settings(self, tab_index=0):

@@ -39,9 +39,16 @@ class ImageOperationsMixin:
 
     def undo_edit(self):
         path = self.workspace.current_image_path
-        if path and path in self.workspace.history:
-            idx = len(self.workspace.history[path]) - 2
+        if path and path in self.workspace.history_indices:
+            idx = self.workspace.history_indices[path] - 1
             if idx >= 0:
+                self.load_history_step(idx)
+
+    def redo_edit(self):
+        path = self.workspace.current_image_path
+        if path and path in self.workspace.history_indices:
+            idx = self.workspace.history_indices[path] + 1
+            if idx < len(self.workspace.history.get(path, [])):
                 self.load_history_step(idx)
 
     def smart_clean_bubble(self, boxes=None):
@@ -178,7 +185,7 @@ class ImageOperationsMixin:
         self.workspace.edited_images[path] = img
         self.show_edited_image()
         self.update_button_states()
-        self.commit_history("Smart Clean Bubble")
+        self.commit_history(f"Smart Clean ({len(target_boxes)} Boxes)")
 
     # --- TYPESETTING CONTROLS ---
     def toggle_typeset_view(self):

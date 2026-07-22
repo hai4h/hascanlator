@@ -56,6 +56,8 @@ class WorkerProcessingMixin:
         ]
         if not self.ensure_models_ready(reqs): return
 
+        self._pending_history_msg = "Auto Detect (YOLO + OCR)"
+
         for item in self.scene.items():
             if isinstance(item, BoundingBoxItem) and getattr(item, 'is_auto', False):
                 self.scene.removeItem(item)
@@ -100,9 +102,12 @@ class WorkerProcessingMixin:
             self.statusBar().showMessage("Detection Complete.")
             self.set_processing_lock(False)
             self.update_window_title()
-            self.commit_history("Auto Detect")
+
+            msg = getattr(self, '_pending_history_msg', "Auto Detect")
+            self.commit_history(msg)
 
         self.save_current_page_state()
+
 
     def on_detection_error(self, err_msg):
         QMessageBox.critical(self, "Detection Error", str(err_msg))
@@ -116,6 +121,7 @@ class WorkerProcessingMixin:
         if not self.workspace.current_image_path or not selected_boxes: return
         if not self.ensure_models_ready([("manga_ocr", "kha-white/manga-ocr-base")]): return
 
+        self._pending_history_msg = f"Run OCR ({len(selected_boxes)} Selected)"
         self.set_processing_lock(True)
         self.update_window_title("Reading text...")
         self.right_dock.ocr_input.setPlaceholderText("Reading text...")
@@ -149,7 +155,9 @@ class WorkerProcessingMixin:
         self.statusBar().showMessage("Processing Complete.")
         self.set_processing_lock(False)
         self.update_window_title()
-        self.commit_history("Batch OCR")
+
+        msg = getattr(self, '_pending_history_msg', "Batch OCR")
+        self.commit_history(msg)
 
         # Resume chained workflow if another action triggered OCR on-the-fly
         if hasattr(self, '_pending_post_ocr_action') and self._pending_post_ocr_action:
@@ -196,6 +204,7 @@ class WorkerProcessingMixin:
         self.progress_bar.setValue(0)
         self.statusBar().showMessage(f"Translating {len(boxes_data)} selected boxes...")
 
+        self._pending_history_msg = f"Translate ({len(boxes_data)} Selected)"
         self._auto_clean_and_typeset = False
         self._start_translation_worker(engine, boxes_data)
 
@@ -227,6 +236,7 @@ class WorkerProcessingMixin:
         self.progress_bar.setValue(0)
         self.statusBar().showMessage(f"Processing {len(boxes_data)} selected boxes...")
 
+        self._pending_history_msg = f"Translate & Typeset ({len(boxes_data)} Selected)"
         self._auto_clean_and_typeset = True
         self._auto_typeset_boxes = [box for _, box in boxes_data]
         self._start_translation_worker(engine, boxes_data)
@@ -261,6 +271,7 @@ class WorkerProcessingMixin:
         self.progress_bar.setValue(0)
         self.statusBar().showMessage(f"Processing {len(boxes_data)} boxes on page...")
 
+        self._pending_history_msg = f"Translate & Typeset All ({len(boxes_data)} Boxes)"
         self._auto_clean_and_typeset = True
         self._auto_typeset_boxes = [box for _, box in boxes_data]
         self._start_translation_worker(engine, boxes_data)
@@ -301,7 +312,9 @@ class WorkerProcessingMixin:
         self.set_processing_lock(False)
         self.update_window_title()
         self.save_current_page_state()
-        self.commit_history("Batch Translate & Typeset")
+
+        msg = getattr(self, '_pending_history_msg', "Batch Translate & Typeset")
+        self.commit_history(msg)
 
     def on_translation_error(self, err_msg):
         QMessageBox.critical(self, "Translation Error", str(err_msg))

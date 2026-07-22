@@ -383,7 +383,8 @@ class SettingsDialog(QDialog):
         add_bind("Select All Boxes:", "keybind_select_all", "Ctrl+A")
         add_bind("Delete Selected Box(es):", "keybind_delete_box", "Del")
         add_bind("Add Box (Manual):", "keybind_add_box")
-        add_bind("Undo Image Edit:", "keybind_undo_edit")
+        add_bind("Undo Action:", "keybind_undo_edit")
+        add_bind("Redo Action:", "keybind_redo_edit")
 
         add_header("AI and Processing")
         add_bind("Auto Detect Text (YOLO):", "keybind_auto_detect")

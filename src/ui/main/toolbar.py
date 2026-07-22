@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QCheckBox, QLabel
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QCheckBox, QLabel
 
 class MainToolbar(QWidget):
     """The left-side vertical toolbar."""
@@ -14,7 +14,13 @@ class MainToolbar(QWidget):
         self.btn_reset = QPushButton("Reset")
 
         self.btn_peek = QPushButton("Peek")
+
+        undo_redo_layout = QHBoxLayout()
+        undo_redo_layout.setContentsMargins(0, 0, 0, 0)
         self.btn_undo = QPushButton("Undo")
+        self.btn_redo = QPushButton("Redo")
+        undo_redo_layout.addWidget(self.btn_undo)
+        undo_redo_layout.addWidget(self.btn_redo)
 
         self.chk_auto_process = QCheckBox("Auto-Scan")
 
@@ -25,7 +31,7 @@ class MainToolbar(QWidget):
         layout.addWidget(self.btn_load)
         layout.addWidget(self.btn_reset)
         layout.addWidget(self.btn_peek)
-        layout.addWidget(self.btn_undo)
+        layout.addLayout(undo_redo_layout)
         layout.addWidget(QLabel("<hr>"))
         layout.addWidget(self.chk_auto_process)
         layout.addWidget(self.btn_auto_detect)
