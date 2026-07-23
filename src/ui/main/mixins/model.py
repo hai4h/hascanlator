@@ -143,7 +143,7 @@ class ModelManagementMixin:
         loader = ModelLoaderWorker(model_name, nmt_repo_id=nmt_repo_id)
 
         self.loader_threads.append(loader)
-        loader.finished.connect(lambda m, n, t=loader: self.on_model_loaded(m, n, t))
+        loader.process_finished.connect(lambda m, n, t=loader: self.on_model_loaded(m, n, t))
         loader.error.connect(lambda n, e, t=loader: self.on_model_error(n, e, t))
         loader.start()
 

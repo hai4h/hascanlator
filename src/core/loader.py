@@ -1,7 +1,7 @@
 from PySide6.QtCore import QThread, Signal
 
 class ModelLoaderWorker(QThread):
-    finished = Signal(object, str)
+    process_finished = Signal(object, str)
     error = Signal(str, str)
 
     def __init__(self, model_name, nmt_repo_id="Helsinki-NLP/opus-mt-ja-en"):
@@ -20,7 +20,7 @@ class ModelLoaderWorker(QThread):
 
                 from manga_ocr import MangaOcr
                 model = MangaOcr(pretrained_model_name_or_path=model_path)
-                self.finished.emit(model, self.model_name)
+                self.process_finished.emit(model, self.model_name)
 
             elif self.model_name == "yolo_detector":
                 from ultralytics import YOLO
@@ -31,7 +31,7 @@ class ModelLoaderWorker(QThread):
                     raise RuntimeError(f"Could not download model. If you have network restrictions, enable 'HuggingFace Mirror' in Settings.\n\nError: {dl_err}")
 
                 model = YOLO(model_path)
-                self.finished.emit(model, self.model_name)
+                self.process_finished.emit(model, self.model_name)
 
             elif self.model_name == "nmt_translator":
                 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -80,7 +80,7 @@ class ModelLoaderWorker(QThread):
                         res_text = self.tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
                         return [{"translation_text": res_text}]
 
-                self.finished.emit(NMTWrapper(tokenizer, model, repo_id), self.model_name)
+                self.process_finished.emit(NMTWrapper(tokenizer, model, repo_id), self.model_name)
 
         except Exception as e:
             self.error.emit(self.model_name, str(e))

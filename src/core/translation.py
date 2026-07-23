@@ -3,7 +3,7 @@ from PySide6.QtCore import QThread, Signal
 class BatchTranslationWorker(QThread):
     progress = Signal(str, object) 
     progress_percent = Signal(int)
-    finished = Signal()
+    process_finished = Signal()
     error = Signal(str)
 
     def __init__(self, engine, nmt_model, boxes_data, source_lang='ja', target_lang='en'):
@@ -39,6 +39,6 @@ class BatchTranslationWorker(QThread):
                 
                 self.progress_percent.emit(int(((i + 1) / total) * 100))
                 
-            self.finished.emit()
+            self.process_finished.emit()
         except Exception as e:
             self.error.emit(str(e))

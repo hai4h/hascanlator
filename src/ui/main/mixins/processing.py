@@ -41,7 +41,7 @@ class WorkerProcessingMixin:
             self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
             self.ocr_worker.progress.connect(self.on_ocr_progress)
             self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
-            self.ocr_worker.finished.connect(self.on_batch_ocr_finished)
+            self.ocr_worker.process_finished.connect(self.on_batch_ocr_finished)
             self.ocr_worker.error.connect(self.on_ocr_error)
             self.ocr_worker.start()
             return True
@@ -69,7 +69,7 @@ class WorkerProcessingMixin:
         self.statusBar().showMessage("Detecting text regions...")
 
         self.detect_worker = DetectionWorker(self.workspace.current_image_path, self.yolo_model)
-        self.detect_worker.finished.connect(self.on_detection_finished)
+        self.detect_worker.process_finished.connect(self.on_detection_finished)
         self.detect_worker.error.connect(self.on_detection_error)
         self.detect_worker.start()
 
@@ -94,7 +94,7 @@ class WorkerProcessingMixin:
             self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
             self.ocr_worker.progress.connect(self.on_ocr_progress)
             self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
-            self.ocr_worker.finished.connect(self.on_batch_ocr_finished)
+            self.ocr_worker.process_finished.connect(self.on_batch_ocr_finished)
             self.ocr_worker.error.connect(self.on_ocr_error)
             self.ocr_worker.start()
         else:
@@ -102,7 +102,6 @@ class WorkerProcessingMixin:
             self.statusBar().showMessage("Detection Complete.")
             self.set_processing_lock(False)
             self.update_window_title()
-
             msg = getattr(self, '_pending_history_msg', "Auto Detect")
             self.commit_history(msg)
 
@@ -139,7 +138,7 @@ class WorkerProcessingMixin:
         self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
         self.ocr_worker.progress.connect(self.on_ocr_progress)
         self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
-        self.ocr_worker.finished.connect(self.on_batch_ocr_finished)
+        self.ocr_worker.process_finished.connect(self.on_batch_ocr_finished)
         self.ocr_worker.error.connect(self.on_ocr_error)
         self.ocr_worker.start()
 
@@ -283,7 +282,7 @@ class WorkerProcessingMixin:
         self.translation_worker = BatchTranslationWorker(engine, self.nmt_model, boxes_data, src_lang, tgt_lang)
         self.translation_worker.progress.connect(self.on_translation_progress)
         self.translation_worker.progress_percent.connect(self.progress_bar.setValue)
-        self.translation_worker.finished.connect(self.on_batch_translation_finished)
+        self.translation_worker.process_finished.connect(self.on_batch_translation_finished)
         self.translation_worker.error.connect(self.on_translation_error)
         self.translation_worker.start()
 

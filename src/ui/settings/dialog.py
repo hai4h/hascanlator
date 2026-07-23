@@ -29,7 +29,7 @@ class AdaptiveKeySequenceEdit(QKeySequenceEdit):
 
 # --- FONT DOWNLOAD WORKER ---
 class FontDownloadWorker(QThread):
-    finished = Signal(bool, str)
+    process_finished = Signal(bool, str)
     def run(self):
         try:
             url = "https://dl.dafont.com/dl/?f=anime_ace_bb"
@@ -41,9 +41,9 @@ class FontDownloadWorker(QThread):
                     for file_info in z.infolist():
                         if file_info.filename.lower().endswith(('.ttf', '.otf')):
                             z.extract(file_info, fonts_dir)
-            self.finished.emit(True, "Anime Ace BB downloaded and installed successfully!")
+            self.process_finished.emit(True, "Anime Ace BB downloaded and installed successfully!")
         except Exception as e:
-            self.finished.emit(False, str(e))
+            self.process_finished.emit(False, str(e))
 
 class SettingsDialog(QDialog):
     def __init__(self, main_window):
@@ -487,7 +487,7 @@ class SettingsDialog(QDialog):
         self.btn_dl_font.setStyleSheet("background-color: #444444; color: #aaaaaa;")
 
         self.font_downloader = FontDownloadWorker()
-        self.font_downloader.finished.connect(self._on_font_downloaded)
+        self.font_downloader.process_finished.connect(self._on_font_downloaded)
         self.font_downloader.start()
 
     def _on_font_downloaded(self, success, msg):
