@@ -90,6 +90,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "auto_load_yolo": False,
             "auto_load_nmt": False,
             "auto_process": False,  # Auto-Scan in UI
+            "auto_scan_ocr": True,
+            "auto_scan_translate": False,
+            "auto_scan_clean": False,
+            "auto_scan_typeset": False,
             "use_hf_mirror": False,
             "translation_engine": "google",
             "nmt_model_repo": "Helsinki-NLP/opus-mt-ja-en",
@@ -292,6 +296,58 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.toolbar.chk_auto_process.stateChanged.connect(
             lambda: self.settings.setValue("auto_process", self.toolbar.chk_auto_process.isChecked())
         )
+
+        # --- AUTO-SCAN CONFIGURATION MENU ---
+        from PySide6.QtWidgets import QMenu, QWidgetAction, QVBoxLayout, QCheckBox
+        config_menu = QMenu(self.toolbar.btn_auto_scan_config)
+        config_menu.setStyleSheet("QMenu { border: 1px solid #555; background-color: #2b2b2b; }")
+        config_widget = QWidget()
+        config_layout = QVBoxLayout(config_widget)
+        config_layout.setContentsMargins(10, 10, 10, 10)
+        config_layout.setSpacing(6)
+
+        config_layout.addWidget(QLabel("<b>Auto-Scan Pipeline</b>"))
+
+        chk_yolo = QCheckBox("1. YOLO Detection")
+        chk_yolo.setChecked(True)
+        chk_yolo.setEnabled(False)
+
+        chk_ocr = QCheckBox("2. MangaOCR")
+        chk_ocr.setChecked(self.settings.value("auto_scan_ocr", True, type=bool))
+
+        chk_trans = QCheckBox("3. Translate")
+        chk_trans.setChecked(self.settings.value("auto_scan_translate", False, type=bool))
+
+        chk_clean = QCheckBox("4. Clean Bubble")
+        chk_clean.setChecked(self.settings.value("auto_scan_clean", False, type=bool))
+
+        chk_typeset = QCheckBox("5. Typeset")
+        chk_typeset.setChecked(self.settings.value("auto_scan_typeset", False, type=bool))
+
+        config_layout.addWidget(chk_yolo)
+        config_layout.addWidget(chk_ocr)
+        config_layout.addWidget(chk_trans)
+        config_layout.addWidget(chk_clean)
+        config_layout.addWidget(chk_typeset)
+
+        # Enforce Logical Dependencies visually
+        def on_trans_toggled(v):
+            self.settings.setValue("auto_scan_translate", v)
+            if v and not chk_ocr.isChecked(): chk_ocr.setChecked(True)
+
+        def on_type_toggled(v):
+            self.settings.setValue("auto_scan_typeset", v)
+            if v and not chk_trans.isChecked(): chk_trans.setChecked(True)
+
+        chk_ocr.toggled.connect(lambda v: self.settings.setValue("auto_scan_ocr", v))
+        chk_trans.toggled.connect(on_trans_toggled)
+        chk_clean.toggled.connect(lambda v: self.settings.setValue("auto_scan_clean", v))
+        chk_typeset.toggled.connect(on_type_toggled)
+
+        act = QWidgetAction(config_menu)
+        act.setDefaultWidget(config_widget)
+        config_menu.addAction(act)
+        self.toolbar.btn_auto_scan_config.setMenu(config_menu)
 
         self.nav.btn_prev.clicked.connect(self.prev_image)
         self.nav.btn_next.clicked.connect(self.next_image)

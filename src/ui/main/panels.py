@@ -13,7 +13,13 @@ class HistoryDockWidget(QDockWidget):
     def _setup_ui(self):
         self.history_list = QListWidget()
         self.history_list.setAlternatingRowColors(True)
-        self.history_list.setStyleSheet("QListWidget::item { padding: 4px; border-bottom: 1px solid #3c3c3c; }")
+        self.history_list.setStyleSheet("QListWidget::item { padding: 6px 4px; border-bottom: 1px solid #3c3c3c; }")
+
+        # Enable word wrapping and dynamic resizing
+        self.history_list.setWordWrap(True)
+        self.history_list.setTextElideMode(Qt.ElideNone)
+        self.history_list.setResizeMode(QListWidget.Adjust)
+
         self.setWidget(self.history_list)
 
 class EditorDockWidget(QDockWidget):

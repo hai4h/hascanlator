@@ -22,7 +22,16 @@ class MainToolbar(QWidget):
         undo_redo_layout.addWidget(self.btn_undo)
         undo_redo_layout.addWidget(self.btn_redo)
 
+        from PySide6.QtWidgets import QToolButton
+        auto_scan_layout = QHBoxLayout()
+        auto_scan_layout.setContentsMargins(0, 0, 0, 0)
         self.chk_auto_process = QCheckBox("Auto-Scan")
+        self.btn_auto_scan_config = QToolButton()
+        self.btn_auto_scan_config.setText("⚙")
+        self.btn_auto_scan_config.setToolTip("Configure Auto-Scan Pipeline")
+        self.btn_auto_scan_config.setPopupMode(QToolButton.InstantPopup)
+        auto_scan_layout.addWidget(self.chk_auto_process)
+        auto_scan_layout.addWidget(self.btn_auto_scan_config)
 
         self.btn_auto_detect = QPushButton("Auto Detect")
         self.btn_add_box = QPushButton("Add Box (Manual)")
@@ -33,7 +42,7 @@ class MainToolbar(QWidget):
         layout.addWidget(self.btn_peek)
         layout.addLayout(undo_redo_layout)
         layout.addWidget(QLabel("<hr>"))
-        layout.addWidget(self.chk_auto_process)
+        layout.addLayout(auto_scan_layout)
         layout.addWidget(self.btn_auto_detect)
         layout.addWidget(self.btn_add_box)
         layout.addStretch()

@@ -51,7 +51,7 @@ class ImageOperationsMixin:
             if idx < len(self.workspace.history.get(path, [])):
                 self.load_history_step(idx)
 
-    def smart_clean_bubble(self, boxes=None):
+    def smart_clean_bubble(self, boxes=None, commit=True):
         # UI signals occasionally pass `checked` (bool) as the first argument, handle it safely
         if isinstance(boxes, bool) or boxes is None:
             target_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
@@ -185,7 +185,9 @@ class ImageOperationsMixin:
         self.workspace.edited_images[path] = img
         self.show_edited_image()
         self.update_button_states()
-        self.commit_history(f"Smart Clean ({len(target_boxes)} Boxes)")
+        
+        if commit:
+            self.commit_history(f"Smart Clean ({len(target_boxes)} Boxes)")
 
     # --- TYPESETTING CONTROLS ---
     def toggle_typeset_view(self):

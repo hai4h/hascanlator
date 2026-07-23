@@ -47,16 +47,68 @@ class WorkerProcessingMixin:
             return True
         return False
 
+    def _cleanup_pipeline(self):
+        """Resets the pipeline states to prevent locked ghost jobs."""
+        self._is_auto_scan_pipeline = False
+        self._active_pipeline_boxes = []
+        self._pipeline_flags = {}
+        self.progress_bar.setVisible(False)
+        self.set_processing_lock(False)
+        self.update_window_title()
+
+    def _execute_pipeline_clean_typeset(self):
+        """Final execution arm in the auto-process sequence."""
+        boxes = getattr(self, '_active_pipeline_boxes', [])
+        flags = getattr(self, '_pipeline_flags', {})
+
+        if flags.get('clean') and boxes:
+            self.smart_clean_bubble(boxes=boxes, commit=False)
+
+        if flags.get('typeset') and boxes:
+            for box in boxes:
+                box.toggle_typeset(force_state=True)
+
+        self.statusBar().showMessage("Processing Complete.")
+
+        msg = getattr(self, '_pending_history_msg', "Auto Process")
+        self.commit_history(msg)
+        self.save_current_page_state()
+
+        self._cleanup_pipeline()
+
     def run_auto_detect(self):
         if not self.workspace.current_image_path: return
 
-        reqs = [
-            ("yolo_detector", "ogkalu/manga-text-detector-yolov8s"),
-            ("manga_ocr", "kha-white/manga-ocr-base")
-        ]
+        do_ocr = self.settings.value("auto_scan_ocr", True, type=bool)
+        do_trans = self.settings.value("auto_scan_translate", False, type=bool)
+        do_clean = self.settings.value("auto_scan_clean", False, type=bool)
+        do_type = self.settings.value("auto_scan_typeset", False, type=bool)
+
+        reqs = [("yolo_detector", "ogkalu/manga-text-detector-yolov8s")]
+        if do_ocr or do_trans or do_type:
+            reqs.append(("manga_ocr", "kha-white/manga-ocr-base"))
+            do_ocr = True # Enforce OCR if trans or typeset is requested
+
+        if do_trans or do_type:
+            engine = self.settings.value("translation_engine", "google")
+            if engine == "nmt":
+                reqs.append(("nmt_translator", self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")))
+            do_trans = True
+
         if not self.ensure_models_ready(reqs): return
 
-        self._pending_history_msg = "Auto Detect (YOLO + OCR)"
+        # Dynamically build the log message
+        tasks = ["YOLO"]
+        if do_ocr: tasks.append("OCR")
+        if do_trans: tasks.append("Translate")
+        if do_clean: tasks.append("Clean")
+        if do_type: tasks.append("Typeset")
+
+        self._pending_history_msg = f"Auto Pipeline ({', '.join(tasks)})"
+
+        self._is_auto_scan_pipeline = True
+        self._pipeline_flags = {'ocr': do_ocr, 'trans': do_trans, 'clean': do_clean, 'typeset': do_type}
+        self._active_pipeline_boxes = []
 
         for item in self.scene.items():
             if isinstance(item, BoundingBoxItem) and getattr(item, 'is_auto', False):
@@ -81,39 +133,42 @@ class WorkerProcessingMixin:
             self.scene.addItem(box_item)
             new_boxes.append(box_item)
 
-        if self.mocr_model and new_boxes:
-            self.update_window_title("Reading Text...")
-            self.statusBar().showMessage("Performing Optical Character Recognition...")
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(0)
+        flags = getattr(self, '_pipeline_flags', {})
+        self._active_pipeline_boxes = new_boxes
 
-            boxes_data = [( (int(b.sceneBoundingRect().x()), int(b.sceneBoundingRect().y()),
-                             int(b.sceneBoundingRect().width()), int(b.sceneBoundingRect().height())), b)
-                          for b in new_boxes]
+        if getattr(self, '_is_auto_scan_pipeline', False):
+            if flags.get('ocr') and new_boxes:
+                self.update_window_title("Reading Text...")
+                self.statusBar().showMessage("Performing Optical Character Recognition...")
+                self.progress_bar.setRange(0, 100)
+                self.progress_bar.setValue(0)
 
-            self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
-            self.ocr_worker.progress.connect(self.on_ocr_progress)
-            self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
-            self.ocr_worker.process_finished.connect(self.on_batch_ocr_finished)
-            self.ocr_worker.error.connect(self.on_ocr_error)
-            self.ocr_worker.start()
-        else:
-            self.progress_bar.setVisible(False)
-            self.statusBar().showMessage("Detection Complete.")
-            self.set_processing_lock(False)
-            self.update_window_title()
-            msg = getattr(self, '_pending_history_msg', "Auto Detect")
-            self.commit_history(msg)
+                boxes_data = [((int(b.sceneBoundingRect().x()), int(b.sceneBoundingRect().y()),
+                                int(b.sceneBoundingRect().width()), int(b.sceneBoundingRect().height())), b)
+                              for b in new_boxes]
 
+                self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
+                self.ocr_worker.progress.connect(self.on_ocr_progress)
+                self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
+                self.ocr_worker.process_finished.connect(self.on_batch_ocr_finished)
+                self.ocr_worker.error.connect(self.on_ocr_error)
+                self.ocr_worker.start()
+                return
+            else:
+                self._execute_pipeline_clean_typeset()
+                return
+
+        # Normal finish (Fallback)
+        msg = getattr(self, '_pending_history_msg', "Auto Detect")
+        self.commit_history(msg)
         self.save_current_page_state()
+        self._cleanup_pipeline()
 
 
     def on_detection_error(self, err_msg):
         QMessageBox.critical(self, "Detection Error", str(err_msg))
-        self.progress_bar.setVisible(False)
         self.statusBar().showMessage("Error during detection.")
-        self.set_processing_lock(False)
-        self.update_window_title()
+        self._cleanup_pipeline()
 
     def run_ocr_on_selected(self):
         selected_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
@@ -121,6 +176,9 @@ class WorkerProcessingMixin:
         if not self.ensure_models_ready([("manga_ocr", "kha-white/manga-ocr-base")]): return
 
         self._pending_history_msg = f"Run OCR ({len(selected_boxes)} Selected)"
+        self._is_auto_scan_pipeline = True
+        self._pipeline_flags = {'trans': False, 'clean': False, 'typeset': False}
+        self._active_pipeline_boxes = selected_boxes
         self.set_processing_lock(True)
         self.update_window_title("Reading text...")
         self.right_dock.ocr_input.setPlaceholderText("Reading text...")
@@ -150,29 +208,40 @@ class WorkerProcessingMixin:
             self._updating_ui = False
 
     def on_batch_ocr_finished(self):
-        self.progress_bar.setVisible(False)
-        self.statusBar().showMessage("Processing Complete.")
-        self.set_processing_lock(False)
-        self.update_window_title()
-
-        msg = getattr(self, '_pending_history_msg', "Batch OCR")
-        self.commit_history(msg)
-
         # Resume chained workflow if another action triggered OCR on-the-fly
         if hasattr(self, '_pending_post_ocr_action') and self._pending_post_ocr_action:
             action = self._pending_post_ocr_action
             self._pending_post_ocr_action = None
             action()
+            return
+
+        flags = getattr(self, '_pipeline_flags', {})
+        boxes = getattr(self, '_active_pipeline_boxes', [])
+
+        if getattr(self, '_is_auto_scan_pipeline', False):
+            if flags.get('trans') and boxes:
+                boxes_data = [(box.raw_text, box) for box in boxes if box.raw_text.strip()]
+                if boxes_data:
+                    engine = self.settings.value("translation_engine", "google")
+                    self._start_translation_worker(engine, boxes_data)
+                    return
+
+            self._execute_pipeline_clean_typeset()
+            return
+
+        # Normal finish (Fallback)
+        msg = getattr(self, '_pending_history_msg', "Batch OCR")
+        self.commit_history(msg)
+        self._cleanup_pipeline()
 
     def on_ocr_error(self, err_msg):
         QMessageBox.critical(self, "OCR Error", str(err_msg))
-        self.progress_bar.setVisible(False)
         self.statusBar().showMessage("Error during OCR.")
-        self.set_processing_lock(False)
-        self.update_window_title()
 
         if hasattr(self, '_pending_post_ocr_action'):
             self._pending_post_ocr_action = None
+
+        self._cleanup_pipeline()
 
     # --- TRANSLATION LOGIC ---
     def run_translation_on_selected(self):
@@ -204,7 +273,9 @@ class WorkerProcessingMixin:
         self.statusBar().showMessage(f"Translating {len(boxes_data)} selected boxes...")
 
         self._pending_history_msg = f"Translate ({len(boxes_data)} Selected)"
-        self._auto_clean_and_typeset = False
+        self._is_auto_scan_pipeline = True
+        self._pipeline_flags = {'clean': False, 'typeset': False, 'trans': True}
+        self._active_pipeline_boxes = selected_boxes
         self._start_translation_worker(engine, boxes_data)
 
     def run_translate_typeset_selected(self):
@@ -236,8 +307,9 @@ class WorkerProcessingMixin:
         self.statusBar().showMessage(f"Processing {len(boxes_data)} selected boxes...")
 
         self._pending_history_msg = f"Translate & Typeset ({len(boxes_data)} Selected)"
-        self._auto_clean_and_typeset = True
-        self._auto_typeset_boxes = [box for _, box in boxes_data]
+        self._is_auto_scan_pipeline = True
+        self._pipeline_flags = {'clean': True, 'typeset': True, 'trans': True}
+        self._active_pipeline_boxes = selected_boxes
         self._start_translation_worker(engine, boxes_data)
 
     def run_translate_typeset_all(self):
@@ -271,8 +343,9 @@ class WorkerProcessingMixin:
         self.statusBar().showMessage(f"Processing {len(boxes_data)} boxes on page...")
 
         self._pending_history_msg = f"Translate & Typeset All ({len(boxes_data)} Boxes)"
-        self._auto_clean_and_typeset = True
-        self._auto_typeset_boxes = [box for _, box in boxes_data]
+        self._is_auto_scan_pipeline = True
+        self._pipeline_flags = {'clean': True, 'typeset': True, 'trans': True}
+        self._active_pipeline_boxes = [box for _, box in boxes_data]
         self._start_translation_worker(engine, boxes_data)
 
     def _start_translation_worker(self, engine, boxes_data):
@@ -297,27 +370,17 @@ class WorkerProcessingMixin:
                 self.current_selected_box.update_typeset()
 
     def on_batch_translation_finished(self):
-        if getattr(self, '_auto_clean_and_typeset', False):
-            if hasattr(self, '_auto_typeset_boxes') and self._auto_typeset_boxes:
-                self.smart_clean_bubble(boxes=self._auto_typeset_boxes)
-                for box in self._auto_typeset_boxes:
-                    box.toggle_typeset(force_state=True)
+        if getattr(self, '_is_auto_scan_pipeline', False):
+            self._execute_pipeline_clean_typeset()
+            return
 
-            self._auto_clean_and_typeset = False
-            self._auto_typeset_boxes = []
-
-        self.progress_bar.setVisible(False)
-        self.statusBar().showMessage("Translation Complete.")
-        self.set_processing_lock(False)
-        self.update_window_title()
+        # Normal finish (Fallback)
         self.save_current_page_state()
-
         msg = getattr(self, '_pending_history_msg', "Batch Translate & Typeset")
         self.commit_history(msg)
+        self._cleanup_pipeline()
 
     def on_translation_error(self, err_msg):
         QMessageBox.critical(self, "Translation Error", str(err_msg))
-        self.progress_bar.setVisible(False)
         self.statusBar().showMessage("Error during translation.")
-        self.set_processing_lock(False)
-        self.update_window_title()
+        self._cleanup_pipeline()
