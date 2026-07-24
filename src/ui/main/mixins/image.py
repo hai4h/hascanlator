@@ -334,6 +334,16 @@ class ImageOperationsMixin:
         box.is_italic = _get_bool("default_font_italic")
         box.is_underline = _get_bool("default_font_underline")
         box.is_strikeout = _get_bool("default_font_strikeout")
+        
+        align_val = self.settings.value("default_align", "center")
+        if align_val == "left": box.align = Qt.AlignLeft
+        elif align_val == "right": box.align = Qt.AlignRight
+        else: box.align = Qt.AlignCenter
+        
+        try:
+            box.indent = int(self.settings.value("default_indent", 5))
+        except ValueError:
+            box.indent = 5
 
     def reset_text_font(self):
         changed = False

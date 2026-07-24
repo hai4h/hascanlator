@@ -289,6 +289,24 @@ class SettingsDialog(QDialog):
         fd_layout.addWidget(self.def_chk_under, 2, 2)
         fd_layout.addWidget(self.def_chk_strike, 2, 3)
 
+        fd_layout.addWidget(QLabel("Align:"), 3, 0)
+        self.def_align_combo = QComboBox()
+        self.def_align_combo.addItems(["Left", "Center", "Right"])
+        saved_align = self.main_window.settings.value("default_align", "center").lower()
+        align_map = {"left": 0, "center": 1, "right": 2}
+        self.def_align_combo.setCurrentIndex(align_map.get(saved_align, 1))
+        self.def_align_combo.currentIndexChanged.connect(
+            lambda idx: self.main_window.settings.setValue("default_align", ["left", "center", "right"][idx])
+        )
+        fd_layout.addWidget(self.def_align_combo, 3, 1)
+
+        fd_layout.addWidget(QLabel("Indent:"), 3, 2)
+        self.def_indent_spin = QSpinBox()
+        self.def_indent_spin.setRange(0, 100)
+        self.def_indent_spin.setValue(int(self.main_window.settings.value("default_indent", 5)))
+        self.def_indent_spin.valueChanged.connect(lambda v: self.main_window.settings.setValue("default_indent", v))
+        fd_layout.addWidget(self.def_indent_spin, 3, 3)
+
         fonts_layout.addWidget(grp_defaults)
 
         # --- Custom Local Fonts ---

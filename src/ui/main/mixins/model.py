@@ -8,11 +8,15 @@ class ModelProgressDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Model Manager")
-        self.setFixedSize(350, 140)
+
+        self.setMinimumWidth(500)
+
         self.setWindowFlags(Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint | Qt.WindowStaysOnTopHint)
         self.setWindowModality(Qt.ApplicationModal)
 
         layout = QVBoxLayout(self)
+        layout.setSizeConstraint(QVBoxLayout.SetFixedSize)
+
         self.lbl_status = QLabel("Preparing...")
         self.lbl_status.setTextFormat(Qt.RichText)
         self.lbl_status.setWordWrap(True)

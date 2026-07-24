@@ -105,6 +105,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "default_font_italic": False,
             "default_font_underline": False,
             "default_font_strikeout": False,
+            "default_align": "center",
+            "default_indent": 5,
             "typeset_toolbar_pos": "right",
 
             # Keybind Defaults
@@ -263,13 +265,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.statusBar().addPermanentWidget(self.progress_bar)
 
         self.ram_lbl = QLabel("RAM: 0.00 GB")
-        self.ram_lbl.setStyleSheet("padding-left: 10px; padding-right: 10px; color: #888;")
+        self.ram_lbl.setTextFormat(Qt.RichText)
+        self.ram_lbl.setStyleSheet("padding-left: 10px; padding-right: 10px; color: #aaa;")
         self.statusBar().addPermanentWidget(self.ram_lbl)
-
-        try:
-            self.system_total_ram_gb = psutil.virtual_memory().total / (1024 ** 3)
-        except Exception:
-            self.system_total_ram_gb = 0.0
 
         self.ram_timer = QTimer(self)
         self.ram_timer.timeout.connect(self._update_ram_usage)
@@ -351,6 +349,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         self.nav.btn_prev.clicked.connect(self.prev_image)
         self.nav.btn_next.clicked.connect(self.next_image)
+        self.nav.page_jump_requested.connect(self.jump_to_image)
 
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.right_dock.btn_run_ocr.clicked.connect(self.run_ocr_on_selected)
@@ -484,12 +483,19 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
     def _update_ram_usage(self):
         try:
             process = psutil.Process(os.getpid())
-            app_gb_usage = process.memory_info().rss / (1024 ** 3)
+            app_gb = process.memory_info().rss / (1024 ** 3)
 
-            if getattr(self, 'system_total_ram_gb', 0.0) > 0:
-                self.ram_lbl.setText(f"RAM: {app_gb_usage:.2f} GB / {self.system_total_ram_gb:.1f} GB")
-            else:
-                self.ram_lbl.setText(f"RAM: {app_gb_usage:.2f} GB")
+            vm = psutil.virtual_memory()
+            # (total - available) is a cross-platform reliable way to get actual used RAM
+            sys_used_gb = (vm.total - vm.available) / (1024 ** 3)
+            sys_total_gb = vm.total / (1024 ** 3)
+
+            # Colors: Green for App, Orange for System Used, Light Blue for System Total
+            self.ram_lbl.setText(
+                f"RAM: <font color='#5cb85c'><b>{app_gb:.2f} GB</b></font> (App)  |  "
+                f"<font color='#f0ad4e'><b>{sys_used_gb:.2f} GB</b></font> / "
+                f"<font color='#5bc0de'><b>{sys_total_gb:.1f} GB</b></font> (System)"
+            )
         except Exception:
             pass
 
@@ -687,6 +693,16 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self._refresh_history_ui()
         self.set_processing_lock(False)
         self.update_button_states()
+
+    def jump_to_image(self, target_idx):
+        if not self.is_processing and self.workspace.has_images:
+            if 0 <= target_idx < self.workspace.total_pages and target_idx != self.workspace.current_img_index:
+                self.save_current_page_state()
+                self.workspace.current_img_index = target_idx
+                self.render_current_page()
+            else:
+                # Reset display to current page if they typed an out-of-bounds number
+                self.nav.update_labels(self.workspace.current_page_number, self.workspace.total_pages)
 
     def prev_image(self):
         if not self.is_processing:
