@@ -35,11 +35,6 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.text_item.setAcceptHoverEvents(False)
         self.text_item.setZValue(-1)
 
-        # Enforce strict word wrapping (avoids breaking in the middle of words)
-        text_option = self.text_item.document().defaultTextOption()
-        text_option.setWrapMode(QTextOption.WordWrap)
-        self.text_item.document().setDefaultTextOption(text_option)
-
         self.is_typeset = False
         self.align = Qt.AlignCenter
         self.valign = Qt.AlignVCenter
@@ -68,36 +63,59 @@ class BoundingBoxItem(QGraphicsRectItem):
     def update_typeset(self):
         r = self.rect()
 
-        # Subtract indent from text width so Qt perfectly centers it physically
+        # 1. Remove Qt's default internal document margin (4px) which ruins perfect centering
+        self.text_item.document().setDocumentMargin(0)
+
+        # Determine strict drawing width based on indent
         usable_width = max(10.0, r.width() - (self.indent * 2))
         self.text_item.setTextWidth(usable_width)
 
-        align_str = "center"
-        if self.align == Qt.AlignLeft: align_str = "left"
-        elif self.align == Qt.AlignRight: align_str = "right"
+        # 2. Apply raw text (no HTML) to prevent CSS margin/padding interference
+        self.text_item.setPlainText(self.translated_text)
 
-        weight = "bold" if self.is_bold else "normal"
-        style = "italic" if self.is_italic else "normal"
+        # 3. Build explicit Font Object (Use Pixels instead of Points for exact 1:1 scaling)
+        font = QFont(self.font_family)
+        font.setPixelSize(self.font_size)
+        font.setBold(self.is_bold)
+        font.setItalic(self.is_italic)
+        font.setUnderline(self.is_underline)
+        font.setStrikeOut(self.is_strikeout)
+        self.text_item.setFont(font)
+        self.text_item.setDefaultTextColor(QColor("black"))
 
-        decorations = []
-        if self.is_underline: decorations.append("underline")
-        if self.is_strikeout: decorations.append("line-through")
-        text_decor = " ".join(decorations) if decorations else "none"
+        # 4. Apply Global Text Options (Restore standard WordWrap to keep words whole)
+        text_option = QTextOption()
+        text_option.setWrapMode(QTextOption.WordWrap)
+        text_option.setAlignment(self.align)
+        self.text_item.document().setDefaultTextOption(text_option)
 
-        text = self.translated_text.replace('\n', '<br>')
-        # Removed CSS margin, using precise coordinate positioning instead for perfect alignment
-        html = f"<div align='{align_str}' style='line-height: {self.line_spacing}; color: black; font-family: \"{self.font_family}\", sans-serif; font-size: {self.font_size}px; font-weight: {weight}; font-style: {style}; text-decoration: {text_decor};'>{text}</div>"
+        # 5. Apply Line Spacing and Alignment via Block Format to guarantee it applies to all text blocks
+        from PySide6.QtGui import QTextCursor, QTextBlockFormat
+        cursor = QTextCursor(self.text_item.document())
+        cursor.select(QTextCursor.Document)
+        block_format = QTextBlockFormat()
+        block_format.setAlignment(self.align)
+        block_format.setLineHeight(self.line_spacing * 100.0, QTextBlockFormat.ProportionalHeight.value)
+        cursor.mergeBlockFormat(block_format)
 
-        self.text_item.setHtml(html)
-
-        text_h = self.text_item.boundingRect().height()
+        # 6. Calculate True Bounds (Detect Overflow) and Position Dynamically
+        text_rect = self.text_item.boundingRect()
+        text_w = text_rect.width()
+        text_h = text_rect.height()
+        box_w = r.width()
         box_h = r.height()
+
+        # If a word is too big, Qt forces text_w to be larger than usable_width.
+        # This math perfectly centers it even if it bleeds outside the bounding box.
+        if self.align == Qt.AlignLeft: x_pos = r.left() + self.indent
+        elif self.align == Qt.AlignRight: x_pos = r.right() - self.indent - text_w
+        else: x_pos = r.left() + (box_w - text_w) / 2.0
 
         if self.valign == Qt.AlignTop: y_pos = r.top() + self.indent
         elif self.valign == Qt.AlignBottom: y_pos = r.bottom() - text_h - self.indent
         else: y_pos = r.top() + (box_h - text_h) / 2.0
 
-        self.text_item.setPos(r.left() + self.indent, y_pos)
+        self.text_item.setPos(x_pos, y_pos)
 
     def toggle_typeset(self, force_state=None):
         self.is_typeset = force_state if force_state is not None else not self.is_typeset

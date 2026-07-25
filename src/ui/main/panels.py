@@ -5,8 +5,7 @@ class HistoryDockWidget(QDockWidget):
     def __init__(self, parent=None):
         super().__init__("Changes", parent)
 
-        self.setMinimumWidth(100)
-        self.setMaximumWidth(250)
+        self.setMinimumWidth(150)
 
         self._setup_ui()
 

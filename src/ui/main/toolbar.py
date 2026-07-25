@@ -1,10 +1,12 @@
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QCheckBox, QLabel
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QCheckBox, QLabel, QSizePolicy
 
 class MainToolbar(QWidget):
     """The left-side vertical toolbar."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(160)
+        # Ensure it has a baseline but allow it to stretch horizontally to fit larger fonts naturally
+        self.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Expanding)
+        self.setMinimumWidth(160)
         self._setup_ui()
 
     def _setup_ui(self):

@@ -50,7 +50,11 @@ class SettingsDialog(QDialog):
         super().__init__(main_window)
         self.main_window = main_window
         self.setWindowTitle("Settings & Model Manager")
-        self.resize(650, 600)
+
+        screen_geom = self.screen().availableGeometry()
+        self.resize(int(screen_geom.width() * 0.4), int(screen_geom.height() * 0.6))
+        self.setMinimumSize(650, 600)
+
         self.setAttribute(Qt.WA_DeleteOnClose)
 
         self.main_window.model_status_changed.connect(self.update_ui_state)
