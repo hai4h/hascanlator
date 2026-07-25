@@ -108,6 +108,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "default_align": "center",
             "default_indent": 5,
             "typeset_toolbar_pos": "right",
+            "ocr_allow_edit": False,
+            "format_ellipsis_standard": True,
+            "format_ellipsis_newline": True,
 
             # Keybind Defaults
             "keybind_select_all": "Ctrl+A",
@@ -255,6 +258,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         # Apply initial position from settings
         initial_pos = self.settings.value("typeset_toolbar_pos", "right")
         self.set_typeset_toolbar_position(initial_pos)
+        
+        # Apply OCR edit lock setting
+        self.right_dock.ocr_input.setReadOnly(not self.settings.value("ocr_allow_edit", False, type=bool))
 
         main_layout.addWidget(self.toolbar)
         main_layout.addWidget(center_area, stretch=1)

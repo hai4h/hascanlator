@@ -360,6 +360,20 @@ class WorkerProcessingMixin:
         self.translation_worker.start()
 
     def on_translation_progress(self, translated_text, box_item_ref):
+        import re
+
+        # 1. Convert scattered full-width Japanese dots into standard ellipses
+        if self.settings.value("format_ellipsis_standard", True, type=bool):
+            # Matches any sequence of 2 or more dots/ellipses, ignoring spaces or line-breaks between them
+            translated_text = re.sub(r'[\.．。・…‥](?:\s*[\.．。・…‥])+', '...', translated_text)
+
+        # 2. Break ellipses onto their own line to prevent awkward wide bounding box stretch
+        if self.settings.value("format_ellipsis_newline", True, type=bool):
+            # Safely pad any sequence of 2+ dots or real ellipses with newlines
+            translated_text = re.sub(r'(\.{2,}|…+)', r'\n\1\n', translated_text)
+            # Reconstruct the string to automatically collapse empty lines and trim trailing/leading spaces
+            translated_text = "\n".join([line.strip() for line in translated_text.splitlines() if line.strip()])
+
         box_item_ref.translated_text = translated_text
         if self.current_selected_box == box_item_ref:
             self._updating_ui = True

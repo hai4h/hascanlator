@@ -32,6 +32,7 @@ class BoundingBoxItem(QGraphicsRectItem):
 
         self.text_item.setAcceptedMouseButtons(Qt.NoButton)
         self.text_item.setTextInteractionFlags(Qt.NoTextInteraction)
+        self.text_item.setAcceptHoverEvents(False)
         self.text_item.setZValue(-1)
 
         # Enforce strict word wrapping (avoids breaking in the middle of words)
@@ -66,7 +67,10 @@ class BoundingBoxItem(QGraphicsRectItem):
 
     def update_typeset(self):
         r = self.rect()
-        self.text_item.setTextWidth(r.width())
+
+        # Subtract indent from text width so Qt perfectly centers it physically
+        usable_width = max(10.0, r.width() - (self.indent * 2))
+        self.text_item.setTextWidth(usable_width)
 
         align_str = "center"
         if self.align == Qt.AlignLeft: align_str = "left"
@@ -81,18 +85,19 @@ class BoundingBoxItem(QGraphicsRectItem):
         text_decor = " ".join(decorations) if decorations else "none"
 
         text = self.translated_text.replace('\n', '<br>')
-        html = f"<div align='{align_str}' style='margin: {self.indent}px; line-height: {self.line_spacing}; color: black; font-family: \"{self.font_family}\", sans-serif; font-size: {self.font_size}px; font-weight: {weight}; font-style: {style}; text-decoration: {text_decor};'>{text}</div>"
+        # Removed CSS margin, using precise coordinate positioning instead for perfect alignment
+        html = f"<div align='{align_str}' style='line-height: {self.line_spacing}; color: black; font-family: \"{self.font_family}\", sans-serif; font-size: {self.font_size}px; font-weight: {weight}; font-style: {style}; text-decoration: {text_decor};'>{text}</div>"
 
         self.text_item.setHtml(html)
 
         text_h = self.text_item.boundingRect().height()
         box_h = r.height()
 
-        if self.valign == Qt.AlignTop: y_pos = r.top()
-        elif self.valign == Qt.AlignBottom: y_pos = r.bottom() - text_h
+        if self.valign == Qt.AlignTop: y_pos = r.top() + self.indent
+        elif self.valign == Qt.AlignBottom: y_pos = r.bottom() - text_h - self.indent
         else: y_pos = r.top() + (box_h - text_h) / 2.0
 
-        self.text_item.setPos(r.left(), y_pos)
+        self.text_item.setPos(r.left() + self.indent, y_pos)
 
     def toggle_typeset(self, force_state=None):
         self.is_typeset = force_state if force_state is not None else not self.is_typeset

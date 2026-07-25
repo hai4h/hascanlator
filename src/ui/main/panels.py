@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt
 
 class HistoryDockWidget(QDockWidget):
     def __init__(self, parent=None):
-        super().__init__("History Log", parent)
+        super().__init__("Changes", parent)
 
         self.setMinimumWidth(100)
         self.setMaximumWidth(250)
@@ -34,6 +34,7 @@ class EditorDockWidget(QDockWidget):
         # Basic Translation Tools
         self.ocr_input = QTextEdit()
         self.ocr_input.setStyleSheet("font-size: 16px;")
+        self.ocr_input.setReadOnly(True)
         self.trans_input = QTextEdit()
 
         tools_layout = QHBoxLayout()

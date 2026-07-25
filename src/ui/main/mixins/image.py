@@ -124,12 +124,23 @@ class ImageOperationsMixin:
             tolerance = 0.02 # Allow 2% noise (handles slight screentones/artifacts)
 
             while can_exp_left or can_exp_right or can_exp_top or can_exp_bottom:
+                # Ignore the corners of the bounding box to allow deeper expansion into oval bubbles
+                y_margin = int((curr_y2 - curr_y1) * 0.20)
+                chk_y1 = curr_y1 + y_margin
+                chk_y2 = curr_y2 - y_margin
+                if chk_y2 <= chk_y1: chk_y1, chk_y2 = curr_y1, curr_y2
+
+                x_margin = int((curr_x2 - curr_x1) * 0.20)
+                chk_x1 = curr_x1 + x_margin
+                chk_x2 = curr_x2 - x_margin
+                if chk_x2 <= chk_x1: chk_x1, chk_x2 = curr_x1, curr_x2
+
                 if can_exp_left:
                     nx = max(0, curr_x1 - step)
                     if nx == curr_x1 or (curr_x2 - nx) > max_dim:
                         can_exp_left = False
                     else:
-                        edge = thresh[curr_y1:curr_y2, nx:curr_x1]
+                        edge = thresh[chk_y1:chk_y2, nx:curr_x1]
                         if np.sum(edge == 0) / max(1, edge.size) > tolerance:
                             can_exp_left = False
                         else:
@@ -140,7 +151,7 @@ class ImageOperationsMixin:
                     if nx == curr_x2 or (nx - curr_x1) > max_dim:
                         can_exp_right = False
                     else:
-                        edge = thresh[curr_y1:curr_y2, curr_x2:nx]
+                        edge = thresh[chk_y1:chk_y2, curr_x2:nx]
                         if np.sum(edge == 0) / max(1, edge.size) > tolerance:
                             can_exp_right = False
                         else:
@@ -151,7 +162,7 @@ class ImageOperationsMixin:
                     if ny == curr_y1 or (curr_y2 - ny) > max_dim:
                         can_exp_top = False
                     else:
-                        edge = thresh[ny:curr_y1, curr_x1:curr_x2]
+                        edge = thresh[ny:curr_y1, chk_x1:chk_x2]
                         if np.sum(edge == 0) / max(1, edge.size) > tolerance:
                             can_exp_top = False
                         else:
@@ -162,14 +173,14 @@ class ImageOperationsMixin:
                     if ny == curr_y2 or (ny - curr_y1) > max_dim:
                         can_exp_bottom = False
                     else:
-                        edge = thresh[curr_y2:ny, curr_x1:curr_x2]
+                        edge = thresh[curr_y2:ny, chk_x1:chk_x2]
                         if np.sum(edge == 0) / max(1, edge.size) > tolerance:
                             can_exp_bottom = False
                         else:
                             curr_y2 = ny
 
             # Add padding so Typeset Text doesn't touch the bubble walls
-            pad = 6
+            pad = 4
             final_x1, final_y1 = curr_x1 + pad, curr_y1 + pad
             final_x2, final_y2 = curr_x2 - pad, curr_y2 - pad
 
@@ -185,7 +196,7 @@ class ImageOperationsMixin:
         self.workspace.edited_images[path] = img
         self.show_edited_image()
         self.update_button_states()
-        
+
         if commit:
             self.commit_history(f"Smart Clean ({len(target_boxes)} Boxes)")
 
@@ -334,12 +345,12 @@ class ImageOperationsMixin:
         box.is_italic = _get_bool("default_font_italic")
         box.is_underline = _get_bool("default_font_underline")
         box.is_strikeout = _get_bool("default_font_strikeout")
-        
+
         align_val = self.settings.value("default_align", "center")
         if align_val == "left": box.align = Qt.AlignLeft
         elif align_val == "right": box.align = Qt.AlignRight
         else: box.align = Qt.AlignCenter
-        
+
         try:
             box.indent = int(self.settings.value("default_indent", 5))
         except ValueError:

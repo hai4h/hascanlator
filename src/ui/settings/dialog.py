@@ -244,6 +244,31 @@ class SettingsDialog(QDialog):
 
         self._update_nmt_lang_states()
 
+        trans_layout.addWidget(QLabel("<hr>"))
+        trans_layout.addWidget(QLabel("<b>Text Formatting & Editor</b>"))
+
+        chk_ocr_edit = QCheckBox("Allow manual editing of OCR text box")
+        chk_ocr_edit.setChecked(self.main_window.settings.value("ocr_allow_edit", False, type=bool))
+
+        def on_ocr_edit_changed(v):
+            self.main_window.settings.setValue("ocr_allow_edit", v)
+            self.main_window.right_dock.ocr_input.setReadOnly(not v)
+
+        chk_ocr_edit.stateChanged.connect(lambda: on_ocr_edit_changed(chk_ocr_edit.isChecked()))
+        trans_layout.addWidget(chk_ocr_edit)
+
+        chk_ell_std = QCheckBox("Auto-convert Japanese ellipsis to standard '...' (Post-translation)")
+        chk_ell_std.setChecked(self.main_window.settings.value("format_ellipsis_standard", True, type=bool))
+        chk_ell_std.stateChanged.connect(lambda: self.main_window.settings.setValue("format_ellipsis_standard", chk_ell_std.isChecked()))
+        trans_layout.addWidget(chk_ell_std)
+
+        chk_ell_nl = QCheckBox("Auto-move ellipsis to a separate line (Post-translation)")
+        chk_ell_nl.setChecked(self.main_window.settings.value("format_ellipsis_newline", True, type=bool))
+        chk_ell_nl.stateChanged.connect(lambda: self.main_window.settings.setValue("format_ellipsis_newline", chk_ell_nl.isChecked()))
+        trans_layout.addWidget(chk_ell_nl)
+
+        trans_layout.addStretch()
+
         # ==========================================
         # TAB 3: FONTS SETTINGS
         # ==========================================
