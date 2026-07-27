@@ -49,6 +49,10 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.is_underline = False
         self.is_strikeout = False
 
+        self.text_color = QColor("black")
+        self.stroke_width = 0
+        self.stroke_color = QColor("white")
+
     def boundingRect(self):
         """Expand the invisible hit-box so we can grab the edges from the outside."""
         margin = float(self.handle_size)
@@ -68,12 +72,11 @@ class BoundingBoxItem(QGraphicsRectItem):
 
         # Determine strict drawing width based on indent
         usable_width = max(10.0, r.width() - (self.indent * 2))
-        self.text_item.setTextWidth(usable_width)
 
-        # 2. Apply raw text (no HTML) to prevent CSS margin/padding interference
+        # --- PASS 1: Natural Wrapping at Strict Width ---
+        self.text_item.setTextWidth(usable_width)
         self.text_item.setPlainText(self.translated_text)
 
-        # 3. Build explicit Font Object (Use Pixels instead of Points for exact 1:1 scaling)
         font = QFont(self.font_family)
         font.setPixelSize(self.font_size)
         font.setBold(self.is_bold)
@@ -81,35 +84,75 @@ class BoundingBoxItem(QGraphicsRectItem):
         font.setUnderline(self.is_underline)
         font.setStrikeOut(self.is_strikeout)
         self.text_item.setFont(font)
-        self.text_item.setDefaultTextColor(QColor("black"))
+        self.text_item.setDefaultTextColor(self.text_color)
 
-        # 4. Apply Global Text Options (Restore standard WordWrap to keep words whole)
         text_option = QTextOption()
         text_option.setWrapMode(QTextOption.WordWrap)
         text_option.setAlignment(self.align)
         self.text_item.document().setDefaultTextOption(text_option)
 
-        # 5. Apply Line Spacing and Alignment via Block Format to guarantee it applies to all text blocks
-        from PySide6.QtGui import QTextCursor, QTextBlockFormat
-        cursor = QTextCursor(self.text_item.document())
-        cursor.select(QTextCursor.Document)
-        block_format = QTextBlockFormat()
-        block_format.setAlignment(self.align)
-        block_format.setLineHeight(self.line_spacing * 100.0, QTextBlockFormat.ProportionalHeight.value)
-        cursor.mergeBlockFormat(block_format)
+        from PySide6.QtGui import QTextCursor, QTextBlockFormat, QTextCharFormat, QPen
 
-        # 6. Calculate True Bounds (Detect Overflow) and Position Dynamically
+        def apply_formats():
+            cursor = QTextCursor(self.text_item.document())
+            cursor.select(QTextCursor.Document)
+
+            block_format = QTextBlockFormat()
+            block_format.setAlignment(self.align)
+            block_format.setLineHeight(self.line_spacing * 100.0, QTextBlockFormat.ProportionalHeight.value)
+            cursor.mergeBlockFormat(block_format)
+
+            char_format = QTextCharFormat()
+            if self.stroke_width > 0:
+                pen = QPen(self.stroke_color, self.stroke_width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+                char_format.setTextOutline(pen)
+            else:
+                char_format.setTextOutline(QPen(Qt.NoPen))
+            cursor.mergeCharFormat(char_format)
+
+        apply_formats()
+
+        # --- PASS 2: Hard-Wrap on Overflow Detection ---
         text_rect = self.text_item.boundingRect()
-        text_w = text_rect.width()
+        actual_text_w = text_rect.width()
+
+        # If an unbreakable word causes overflow, freeze the shorter lines into manual line breaks
+        if actual_text_w > usable_width + 1.0:
+            doc = self.text_item.document()
+            wrapped_lines = []
+            for i in range(doc.blockCount()):
+                block = doc.findBlockByNumber(i)
+                layout = block.layout()
+                if layout.lineCount() == 0:
+                    wrapped_lines.append("")
+                else:
+                    for j in range(layout.lineCount()):
+                        line = layout.lineAt(j)
+                        start = line.textStart()
+                        length = line.textLength()
+                        wrapped_lines.append(block.text()[start:start+length].strip())
+
+            # Re-apply text with hard breaks
+            self.text_item.setPlainText("\n".join(wrapped_lines))
+
+            # Expand the document width to the overflowing word so ALL lines share the exact same center axis
+            self.text_item.setTextWidth(actual_text_w)
+
+            # Re-apply styling lost during setPlainText
+            self.text_item.setFont(font)
+            apply_formats()
+
+            text_rect = self.text_item.boundingRect()
+            actual_text_w = text_rect.width()
+
+        # --- FINAL POSITIONING ---
         text_h = text_rect.height()
         box_w = r.width()
         box_h = r.height()
 
-        # If a word is too big, Qt forces text_w to be larger than usable_width.
-        # This math perfectly centers it even if it bleeds outside the bounding box.
         if self.align == Qt.AlignLeft: x_pos = r.left() + self.indent
-        elif self.align == Qt.AlignRight: x_pos = r.right() - self.indent - text_w
-        else: x_pos = r.left() + (box_w - text_w) / 2.0
+        elif self.align == Qt.AlignRight: x_pos = r.right() - self.indent - actual_text_w
+        else: x_pos = r.left() + (box_w - actual_text_w) / 2.0
 
         if self.valign == Qt.AlignTop: y_pos = r.top() + self.indent
         elif self.valign == Qt.AlignBottom: y_pos = r.bottom() - text_h - self.indent

@@ -110,6 +110,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "default_font_strikeout": False,
             "default_align": "center",
             "default_indent": 5,
+            "default_text_color": "black",
+            "default_stroke_width": 0,
+            "default_stroke_color": "white",
             "typeset_toolbar_pos": "right",
             "ocr_allow_edit": False,
             "format_ellipsis_standard": True,
@@ -411,6 +414,18 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.typeset_toolbar.btn_strike.clicked.connect(self.toggle_text_strikeout)
         self.typeset_toolbar.btn_font_reset.clicked.connect(self.reset_text_font)
 
+        # --- STROKE & COLOR SIGNALS ---
+        self.typeset_toolbar.combo_text_color.currentTextChanged.connect(self.set_text_color)
+        
+        self.typeset_toolbar.spin_stroke_width.valueChanged.connect(self.set_text_stroke_width)
+        self.typeset_toolbar.btn_stroke_plus.clicked.connect(
+            lambda: self.typeset_toolbar.spin_stroke_width.setValue(self.typeset_toolbar.spin_stroke_width.value() + 1)
+        )
+        self.typeset_toolbar.btn_stroke_minus.clicked.connect(
+            lambda: self.typeset_toolbar.spin_stroke_width.setValue(self.typeset_toolbar.spin_stroke_width.value() - 1)
+        )
+        self.typeset_toolbar.combo_stroke_color.currentTextChanged.connect(self.set_text_stroke_color)
+
     def closeEvent(self, event):
         if self.scene:
             self.scene.selectionChanged.disconnect(self.on_selection_changed)
@@ -570,6 +585,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box.is_italic = b_data.get('is_italic', False)
                 box.is_underline = b_data.get('is_underline', False)
                 box.is_strikeout = b_data.get('is_strikeout', False)
+                box.text_color = QColor(b_data.get('text_color', "black"))
+                box.stroke_width = b_data.get('stroke_width', 0)
+                box.stroke_color = QColor(b_data.get('stroke_color', "white"))
 
                 self.scene.addItem(box)
 
@@ -601,7 +619,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'is_bold': getattr(item, 'is_bold', False),
             'is_italic': getattr(item, 'is_italic', False),
             'is_underline': getattr(item, 'is_underline', False),
-            'is_strikeout': getattr(item, 'is_strikeout', False)
+            'is_strikeout': getattr(item, 'is_strikeout', False),
+            'text_color': getattr(item, 'text_color', QColor("black")).name(),
+            'stroke_width': getattr(item, 'stroke_width', 0),
+            'stroke_color': getattr(item, 'stroke_color', QColor("white")).name()
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
 
     def save_current_page_state(self):
@@ -696,6 +717,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             box.is_italic = b_data.get('is_italic', False)
             box.is_underline = b_data.get('is_underline', False)
             box.is_strikeout = b_data.get('is_strikeout', False)
+            box.text_color = QColor(b_data.get('text_color', "black"))
+            box.stroke_width = b_data.get('stroke_width', 0)
+            box.stroke_color = QColor(b_data.get('stroke_color', "white"))
 
             self.scene.addItem(box)
             if b_data.get('is_typeset', False):
@@ -747,6 +771,29 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.typeset_toolbar.spin_size.blockSignals(True)
             self.typeset_toolbar.spin_size.setValue(self.current_selected_box.font_size)
             self.typeset_toolbar.spin_size.blockSignals(False)
+
+            self.typeset_toolbar.combo_text_color.blockSignals(True)
+            t_color_name = self.current_selected_box.text_color.name()
+            for i in range(self.typeset_toolbar.combo_text_color.count()):
+                if self.typeset_toolbar.combo_text_color.itemText(i).lower() == self.current_selected_box.text_color.name().lower() or \
+                   QColor(self.typeset_toolbar.combo_text_color.itemText(i).lower()).name() == t_color_name:
+                    self.typeset_toolbar.combo_text_color.setCurrentIndex(i)
+                    break
+            self.typeset_toolbar.combo_text_color.blockSignals(False)
+
+            self.typeset_toolbar.spin_stroke_width.blockSignals(True)
+            self.typeset_toolbar.spin_stroke_width.setValue(self.current_selected_box.stroke_width)
+            self.typeset_toolbar.spin_stroke_width.blockSignals(False)
+            
+            self.typeset_toolbar.combo_stroke_color.blockSignals(True)
+            color_name = self.current_selected_box.stroke_color.name()
+            # Match the color dynamically, preventing case-sensitivity issues
+            for i in range(self.typeset_toolbar.combo_stroke_color.count()):
+                if self.typeset_toolbar.combo_stroke_color.itemText(i).lower() == self.current_selected_box.stroke_color.name().lower() or \
+                   QColor(self.typeset_toolbar.combo_stroke_color.itemText(i).lower()).name() == color_name:
+                    self.typeset_toolbar.combo_stroke_color.setCurrentIndex(i)
+                    break
+            self.typeset_toolbar.combo_stroke_color.blockSignals(False)
 
             self._updating_ui = False
         else:

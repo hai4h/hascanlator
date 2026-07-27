@@ -336,6 +336,31 @@ class SettingsDialog(QDialog):
         self.def_indent_spin.valueChanged.connect(lambda v: self.main_window.settings.setValue("default_indent", v))
         fd_layout.addWidget(self.def_indent_spin, 3, 3)
 
+        fd_layout.addWidget(QLabel("Text Color:"), 4, 0)
+        self.def_text_combo = QComboBox()
+        self.def_text_combo.addItems(["Black", "White", "Red", "Blue", "Green", "Yellow"])
+        saved_txt = self.main_window.settings.value("default_text_color", "black").capitalize()
+        idx_txt = self.def_text_combo.findText(saved_txt)
+        self.def_text_combo.setCurrentIndex(idx_txt if idx_txt >= 0 else 0)
+        self.def_text_combo.currentTextChanged.connect(lambda t: self.main_window.settings.setValue("default_text_color", t.lower()))
+        fd_layout.addWidget(self.def_text_combo, 4, 1)
+
+        fd_layout.addWidget(QLabel("Stroke Width:"), 4, 2)
+        self.def_stroke_spin = QSpinBox()
+        self.def_stroke_spin.setRange(0, 50)
+        self.def_stroke_spin.setValue(int(self.main_window.settings.value("default_stroke_width", 0)))
+        self.def_stroke_spin.valueChanged.connect(lambda v: self.main_window.settings.setValue("default_stroke_width", v))
+        fd_layout.addWidget(self.def_stroke_spin, 4, 3)
+
+        fd_layout.addWidget(QLabel("Stroke Color:"), 5, 0)
+        self.def_stroke_combo = QComboBox()
+        self.def_stroke_combo.addItems(["White", "Black", "Red", "Blue", "Green", "Yellow"])
+        saved_color = self.main_window.settings.value("default_stroke_color", "white").capitalize()
+        idx = self.def_stroke_combo.findText(saved_color)
+        self.def_stroke_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.def_stroke_combo.currentTextChanged.connect(lambda t: self.main_window.settings.setValue("default_stroke_color", t.lower()))
+        fd_layout.addWidget(self.def_stroke_combo, 5, 1)
+
         fonts_layout.addWidget(grp_defaults)
 
         # --- Custom Local Fonts ---

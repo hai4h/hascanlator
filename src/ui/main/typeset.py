@@ -1,11 +1,15 @@
 from PySide6.QtWidgets import (
-    QWidget, QBoxLayout, QPushButton, QMenu,
+    QWidget, QBoxLayout, QHBoxLayout, QPushButton, QMenu,
     QWidgetAction, QGridLayout, QToolButton, QLabel, QComboBox, QSpinBox, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal
 
 class MenuContainerWidget(QWidget):
     """Custom widget to prevent clicks on empty grid spaces from accidentally closing the QMenu."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+
     def mousePressEvent(self, event):
         event.accept()
     def mouseReleaseEvent(self, event):
@@ -87,7 +91,8 @@ class TypesetToolBar(QWidget):
         self.font_menu.setStyleSheet("border: none;")
 
         font_widget = MenuContainerWidget()
-        font_widget.setStyleSheet("QWidget { background-color: #333333; border: 1px solid #555555; }")
+        font_widget.setObjectName("menuPanel")
+        font_widget.setStyleSheet("#menuPanel { background-color: #333333; border: 1px solid #555555; }")
         font_layout = QGridLayout(font_widget)
         font_layout.setContentsMargins(6, 6, 6, 6)
         font_layout.setSpacing(6)
@@ -112,12 +117,13 @@ class TypesetToolBar(QWidget):
 
         # Row 2: Font Size
         lbl_size = QLabel("Size")
-        lbl_size.setStyleSheet("color: white; border: none;")
+        lbl_size.setStyleSheet("color: white; background: transparent; border: none;")
 
         self.spin_size = QSpinBox()
         self.spin_size.setRange(1, 999)
         self.spin_size.setValue(16)
         self.spin_size.setAlignment(Qt.AlignCenter)
+        self.spin_size.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.spin_size.setStyleSheet("""
             QSpinBox { background: #444444; color: white; border: 1px solid #555555; padding: 2px; border-radius: 3px; }
             QSpinBox::up-button, QSpinBox::down-button { width: 0px; }
@@ -126,10 +132,15 @@ class TypesetToolBar(QWidget):
         self.btn_size_minus = create_menu_btn("-", "Decrease Font Size", False)
         self.btn_size_plus = create_menu_btn("+", "Increase Font Size", False)
 
+        size_layout = QHBoxLayout()
+        size_layout.setContentsMargins(0, 0, 0, 0)
+        size_layout.setSpacing(6)
+        size_layout.addWidget(self.btn_size_minus)
+        size_layout.addWidget(self.spin_size)
+        size_layout.addWidget(self.btn_size_plus)
+
         font_layout.addWidget(lbl_size, 2, 0)
-        font_layout.addWidget(self.spin_size, 2, 1)
-        font_layout.addWidget(self.btn_size_minus, 2, 2)
-        font_layout.addWidget(self.btn_size_plus, 2, 3)
+        font_layout.addLayout(size_layout, 2, 1, 1, 3)
 
         # Row 3: Styling Buttons
         self.btn_bold = create_menu_btn("B", "Toggle Bold", False)
@@ -141,13 +152,67 @@ class TypesetToolBar(QWidget):
         self.btn_strike = create_menu_btn("S", "Toggle Strikeout", False)
         self.btn_strike.setStyleSheet(self.btn_strike.styleSheet() + " text-decoration: line-through; font-weight: normal;")
 
-        font_layout.addWidget(self.btn_bold, 3, 0)
-        font_layout.addWidget(self.btn_italic, 3, 1)
-        font_layout.addWidget(self.btn_underline, 3, 2)
-        font_layout.addWidget(self.btn_strike, 3, 3)
+        style_layout = QHBoxLayout()
+        style_layout.setContentsMargins(0, 0, 0, 0)
+        style_layout.setSpacing(6)
+        for btn in [self.btn_bold, self.btn_italic, self.btn_underline, self.btn_strike]:
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            style_layout.addWidget(btn)
 
-        self.btn_font_reset = create_reset_btn("Reset Font")
-        font_layout.addWidget(self.btn_font_reset, 4, 0, 1, 4)
+        font_layout.addLayout(style_layout, 3, 0, 1, 4)
+
+        # Row 4: Text Color
+        lbl_text_color = QLabel("Text Color")
+        lbl_text_color.setStyleSheet("color: white; background: transparent; border: none;")
+        self.combo_text_color = QComboBox()
+        self.combo_text_color.addItems(["Black", "White", "Red", "Blue", "Green", "Yellow"])
+        self.combo_text_color.setStyleSheet("""
+            QComboBox { background: #444444; color: white; border: 1px solid #555555; padding: 2px; border-radius: 3px; }
+            QAbstractItemView { background: #444444; color: white; selection-background-color: #555555; }
+        """)
+        font_layout.addWidget(lbl_text_color, 4, 0)
+        font_layout.addWidget(self.combo_text_color, 4, 1, 1, 3)
+
+        # Row 5: Stroke Width
+        lbl_stroke_width = QLabel("Stroke Size")
+        lbl_stroke_width.setStyleSheet("color: white; background: transparent; border: none;")
+        self.spin_stroke_width = QSpinBox()
+        self.spin_stroke_width.setRange(0, 50)
+        self.spin_stroke_width.setValue(0)
+        self.spin_stroke_width.setAlignment(Qt.AlignCenter)
+        self.spin_stroke_width.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.spin_stroke_width.setStyleSheet("""
+            QSpinBox { background: #444444; color: white; border: 1px solid #555555; padding: 2px; border-radius: 3px; }
+            QSpinBox::up-button, QSpinBox::down-button { width: 0px; }
+        """)
+        self.btn_stroke_minus = create_menu_btn("-", "Decrease Stroke", False)
+        self.btn_stroke_plus = create_menu_btn("+", "Increase Stroke", False)
+
+        stroke_size_layout = QHBoxLayout()
+        stroke_size_layout.setContentsMargins(0, 0, 0, 0)
+        stroke_size_layout.setSpacing(6)
+        stroke_size_layout.addWidget(self.btn_stroke_minus)
+        stroke_size_layout.addWidget(self.spin_stroke_width)
+        stroke_size_layout.addWidget(self.btn_stroke_plus)
+
+        font_layout.addWidget(lbl_stroke_width, 5, 0)
+        font_layout.addLayout(stroke_size_layout, 5, 1, 1, 3)
+
+        # Row 6: Stroke Color
+        lbl_stroke_color = QLabel("Stroke Color")
+        lbl_stroke_color.setStyleSheet("color: white; background: transparent; border: none;")
+        self.combo_stroke_color = QComboBox()
+        self.combo_stroke_color.addItems(["White", "Black", "Red", "Blue", "Green", "Yellow"])
+        self.combo_stroke_color.setStyleSheet("""
+            QComboBox { background: #444444; color: white; border: 1px solid #555555; padding: 2px; border-radius: 3px; }
+            QAbstractItemView { background: #444444; color: white; selection-background-color: #555555; }
+        """)
+        font_layout.addWidget(lbl_stroke_color, 6, 0)
+        font_layout.addWidget(self.combo_stroke_color, 6, 1, 1, 3)
+
+        # Row 7: Reset
+        self.btn_font_reset = create_reset_btn("Reset Font / Stroke")
+        font_layout.addWidget(self.btn_font_reset, 7, 0, 1, 4)
 
         font_action = QWidgetAction(self)
         font_action.setDefaultWidget(font_widget)
@@ -162,7 +227,8 @@ class TypesetToolBar(QWidget):
         self.align_menu.setStyleSheet("border: none;")
 
         align_widget = MenuContainerWidget()
-        align_widget.setStyleSheet("QWidget { background-color: #333333; border: 1px solid #555555; }")
+        align_widget.setObjectName("menuPanel")
+        align_widget.setStyleSheet("#menuPanel { background-color: #333333; border: 1px solid #555555; }")
         align_layout = QGridLayout(align_widget)
         align_layout.setContentsMargins(6, 6, 6, 6)
         align_layout.setSpacing(6)
@@ -197,18 +263,19 @@ class TypesetToolBar(QWidget):
         self.spacing_menu.setStyleSheet("border: none;")
 
         spacing_widget = MenuContainerWidget()
-        spacing_widget.setStyleSheet("QWidget { background-color: #333333; border: 1px solid #555555; }")
+        spacing_widget.setObjectName("menuPanel")
+        spacing_widget.setStyleSheet("#menuPanel { background-color: #333333; border: 1px solid #555555; }")
         spacing_layout = QGridLayout(spacing_widget)
         spacing_layout.setContentsMargins(6, 6, 6, 6)
         spacing_layout.setSpacing(6)
 
         lbl_line = QLabel("Line")
-        lbl_line.setStyleSheet("color: white; border: none;")
+        lbl_line.setStyleSheet("color: white; background: transparent; border: none;")
         self.btn_line_space_minus = create_menu_btn("-", "Decrease Line Spacing", False)
         self.btn_line_space_plus = create_menu_btn("+", "Increase Line Spacing", False)
 
         lbl_indent = QLabel("Indent")
-        lbl_indent.setStyleSheet("color: white; border: none;")
+        lbl_indent.setStyleSheet("color: white; background: transparent; border: none;")
         self.btn_indent_minus = create_menu_btn("-", "Decrease Indent", False)
         self.btn_indent_plus = create_menu_btn("+", "Increase Indent", False)
 

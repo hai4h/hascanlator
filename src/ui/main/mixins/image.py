@@ -1,12 +1,12 @@
 import cv2
 import numpy as np
-from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap, QImage, QColor
+from PySide6.QtCore import Qt, QRectF
 
 from src.ui.canvas.items import BoundingBoxItem
 
 class ImageOperationsMixin:
-    # --- OPENCV IMAGE HELPERS ---
+    #  OPENCV IMAGE HELPERS
     def imread_utf8(self, filepath):
         """Allows cv2 to load files that contain non-ascii characters in their folder path."""
         img_array = np.fromfile(filepath, np.uint8)
@@ -20,7 +20,7 @@ class ImageOperationsMixin:
         qimg = QImage(converted.data, w, h, bytes_per_line, QImage.Format_RGB888)
         return QPixmap.fromImage(qimg)
 
-    # --- PEEK AND UNDO LOGIC ---
+    #  PEEK AND UNDO LOGIC
     def show_original_image(self):
         path = self.workspace.current_image_path
         if path and path in self.workspace.original_images:
@@ -76,40 +76,68 @@ class ImageOperationsMixin:
 
             roi = img[y:y+h, x:x+w]
 
-            # 3. Smart Masking
+            # 3. Smart Masking Pipeline
             gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Heuristic check: Is this a standard white bubble?
+            # We check the perimeter pixels of the bounding box. If mostly white, it's a bubble.
+            top, bottom = gray[0, :], gray[-1, :]
+            left, right = gray[:, 0], gray[:, -1]
+            border_pixels = np.concatenate([top, bottom, left, right])
+            white_ratio = np.sum(border_pixels > 200) / max(1, len(border_pixels))
 
+            is_standard_bubble = white_ratio > 0.65
             clean_mask = np.zeros_like(gray)
 
-            for contour in contours:
-                cx, cy, cw, ch = cv2.boundingRect(contour)
-                margin = 3
-                touches_edge = (cx <= margin) or (cy <= margin) or (cx + cw >= w - margin) or (cy + ch >= h - margin)
-                area = cv2.contourArea(contour)
-                too_huge = area > (w * h * 0.5)
+            if is_standard_bubble:
+                #  CLASSICAL METHOD (White Bubbles)
+                # Extremely accurate for standard black text on white backgrounds.
+                _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-                if not touches_edge and not too_huge:
-                    cv2.drawContours(clean_mask, [contour], -1, 255, thickness=cv2.FILLED)
+                for contour in contours:
+                    cx, cy, cw, ch = cv2.boundingRect(contour)
+                    margin = 3
+                    touches_edge = (cx <= margin) or (cy <= margin) or (cx + cw >= w - margin) or (cy + ch >= h - margin)
+                    area = cv2.contourArea(contour)
+                    too_huge = area > (w * h * 0.5)
 
-            # 4. Aggressive Mask Expansion
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-            clean_mask = cv2.dilate(clean_mask, kernel, iterations=2)
+                    if not touches_edge and not too_huge:
+                        cv2.drawContours(clean_mask, [contour], -1, 255, thickness=cv2.FILLED)
 
-            # 5. Erase text
-            cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_TELEA)
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                clean_mask = cv2.dilate(clean_mask, kernel, iterations=2)
+            else:
+                # COMPLEX BACKGROUND METHOD (Screentones / Dark Arts)                 # Uses Morphological Gradient to find high-frequency edges (detects both black and white text natively)
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+                grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
+                _, binary = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+                # Clean up noise and form solid text stroke masks
+                clean_mask = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+                # Dilate slightly more (iterations=2) to guarantee no anti-aliased text pixels leak into the inpaint
+                clean_mask = cv2.dilate(clean_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=2)
+
+            # 4. Modual Inpainting Execution (Prepared for Future AI Model)
+            # Future AI Hook: if self.settings.value("use_ai_inpaint"): cleaned_roi = self._run_ai_inpaint(roi, clean_mask)
+            # Classic Fallback:
+            if is_standard_bubble:
+                cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_TELEA)
+            else:
+                # Navier-Stokes (NS) blends fluid backgrounds/gradients slightly better than Telea
+                cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_NS)
+
             img[y:y+h, x:x+w] = cleaned_roi
 
-        # 6. Auto-Expand Bounding Boxes to fill the clean bubble
+            # Store flag inside the box so the auto-expander knows whether to expand or not
+            box._is_standard_bubble = is_standard_bubble
+
+        # 5. Auto-Expand Bounding Boxes to fill the clean bubble
         gray_clean = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # Threshold: 220 to 255 is considered "white space" inside the bubble
-        _, thresh = cv2.threshold(gray_clean, 220, 255, cv2.THRESH_BINARY)
-        max_h, max_w = thresh.shape
-
-        from PySide6.QtCore import QRectF
+        # Milder median blur: destroys screentone dots but keeps thin bubble walls intact (11 was too destructive)
+        blurred = cv2.medianBlur(gray_clean, 5)
+        max_h, max_w = gray_clean.shape
 
         for box in target_boxes:
             rect = box.sceneBoundingRect()
@@ -118,19 +146,35 @@ class ImageOperationsMixin:
             curr_x1, curr_y1 = max(0, bx), max(0, by)
             curr_x2, curr_y2 = min(max_w, bx + bw), min(max_h, by + bh)
 
+            # Unify Auto-Expansion: Dynamically sample the cleaned background to find the wall threshold
+            center_roi = blurred[curr_y1:curr_y2, curr_x1:curr_x2]
+            base_gray = np.median(center_roi) if center_roi.size > 0 else 255
+
+            if base_gray < 50:
+                # Dark bubble, walls are likely white/bright
+                wall_thresh = min(255, base_gray + 50)
+                _, obstacle_map = cv2.threshold(blurred, wall_thresh, 255, cv2.THRESH_BINARY)
+            else:
+                # White/Gray/Screentone bubble, walls are likely black/dark
+                wall_thresh = max(0, base_gray - 50)
+                _, obstacle_map = cv2.threshold(blurred, wall_thresh, 255, cv2.THRESH_BINARY_INV)
+
+            # Strict tolerance to ensure it stops exactly at thin lines
+            tolerance = 0.02
+
             can_exp_left = can_exp_right = can_exp_top = can_exp_bottom = True
-            step = 2
-            max_dim = max(bw, bh) * 3
-            tolerance = 0.02 # Allow 2% noise (handles slight screentones/artifacts)
+            step = 1 # 1 pixel step prevents jumping over 1-pixel thin borders
+            max_dim = max(bw, bh) * 2 # Prevent infinite expansion if the bubble is open
 
             while can_exp_left or can_exp_right or can_exp_top or can_exp_bottom:
                 # Ignore the corners of the bounding box to allow deeper expansion into oval bubbles
-                y_margin = int((curr_y2 - curr_y1) * 0.20)
+                # Reduced back to 15% to prevent the collision-check line from becoming too small and slipping through gaps
+                y_margin = int((curr_y2 - curr_y1) * 0.15)
                 chk_y1 = curr_y1 + y_margin
                 chk_y2 = curr_y2 - y_margin
                 if chk_y2 <= chk_y1: chk_y1, chk_y2 = curr_y1, curr_y2
 
-                x_margin = int((curr_x2 - curr_x1) * 0.20)
+                x_margin = int((curr_x2 - curr_x1) * 0.15)
                 chk_x1 = curr_x1 + x_margin
                 chk_x2 = curr_x2 - x_margin
                 if chk_x2 <= chk_x1: chk_x1, chk_x2 = curr_x1, curr_x2
@@ -140,8 +184,8 @@ class ImageOperationsMixin:
                     if nx == curr_x1 or (curr_x2 - nx) > max_dim:
                         can_exp_left = False
                     else:
-                        edge = thresh[chk_y1:chk_y2, nx:curr_x1]
-                        if np.sum(edge == 0) / max(1, edge.size) > tolerance:
+                        edge = obstacle_map[chk_y1:chk_y2, nx:curr_x1]
+                        if np.sum(edge > 0) / max(1, edge.size) > tolerance:
                             can_exp_left = False
                         else:
                             curr_x1 = nx
@@ -151,8 +195,8 @@ class ImageOperationsMixin:
                     if nx == curr_x2 or (nx - curr_x1) > max_dim:
                         can_exp_right = False
                     else:
-                        edge = thresh[chk_y1:chk_y2, curr_x2:nx]
-                        if np.sum(edge == 0) / max(1, edge.size) > tolerance:
+                        edge = obstacle_map[chk_y1:chk_y2, curr_x2:nx]
+                        if np.sum(edge > 0) / max(1, edge.size) > tolerance:
                             can_exp_right = False
                         else:
                             curr_x2 = nx
@@ -162,8 +206,8 @@ class ImageOperationsMixin:
                     if ny == curr_y1 or (curr_y2 - ny) > max_dim:
                         can_exp_top = False
                     else:
-                        edge = thresh[ny:curr_y1, chk_x1:chk_x2]
-                        if np.sum(edge == 0) / max(1, edge.size) > tolerance:
+                        edge = obstacle_map[ny:curr_y1, chk_x1:chk_x2]
+                        if np.sum(edge > 0) / max(1, edge.size) > tolerance:
                             can_exp_top = False
                         else:
                             curr_y1 = ny
@@ -173,8 +217,8 @@ class ImageOperationsMixin:
                     if ny == curr_y2 or (ny - curr_y1) > max_dim:
                         can_exp_bottom = False
                     else:
-                        edge = thresh[curr_y2:ny, chk_x1:chk_x2]
-                        if np.sum(edge == 0) / max(1, edge.size) > tolerance:
+                        edge = obstacle_map[curr_y2:ny, chk_x1:chk_x2]
+                        if np.sum(edge > 0) / max(1, edge.size) > tolerance:
                             can_exp_bottom = False
                         else:
                             curr_y2 = ny
@@ -200,7 +244,7 @@ class ImageOperationsMixin:
         if commit:
             self.commit_history(f"Smart Clean ({len(target_boxes)} Boxes)")
 
-    # --- TYPESETTING CONTROLS ---
+    #  TYPESETTING CONTROLS
     def toggle_typeset_view(self):
         changed = False
         for box in self.scene.selectedItems():
@@ -264,6 +308,35 @@ class ImageOperationsMixin:
                 if box.is_typeset: box.update_typeset()
                 changed = True
         if changed: self.commit_history("Reset Spacing")
+
+    def set_text_stroke_width(self, width):
+        changed = False
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.stroke_width = max(0, width)
+                if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Change Stroke Width")
+
+    def set_text_stroke_color(self, color_name):
+        changed = False
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                from PySide6.QtGui import QColor
+                box.stroke_color = QColor(color_name.lower())
+                if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Change Stroke Color")
+
+    def set_text_color(self, color_name):
+        changed = False
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                from PySide6.QtGui import QColor
+                box.text_color = QColor(color_name.lower())
+                if box.is_typeset: box.update_typeset()
+                changed = True
+        if changed: self.commit_history("Change Text Color")
 
     def set_text_font_family(self, family):
         changed = False
@@ -355,6 +428,10 @@ class ImageOperationsMixin:
             box.indent = int(self.settings.value("default_indent", 5))
         except ValueError:
             box.indent = 5
+
+        box.text_color = QColor(self.settings.value("default_text_color", "black").lower())
+        box.stroke_width = int(self.settings.value("default_stroke_width", 0))
+        box.stroke_color = QColor(self.settings.value("default_stroke_color", "white").lower())
 
     def reset_text_font(self):
         changed = False

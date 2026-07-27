@@ -59,7 +59,7 @@ class EditorDockWidget(QDockWidget):
         layout.addLayout(tools_layout)
         layout.addWidget(self.btn_trans_type_sel)
         layout.addWidget(self.btn_trans_type_all)
-        layout.addWidget(QLabel("Raw Text (OCR):"))
+        layout.addWidget(QLabel("Original (OCR):"))
         layout.addWidget(self.ocr_input)
         layout.addWidget(QLabel("Translation:"))
         layout.addWidget(self.trans_input)
