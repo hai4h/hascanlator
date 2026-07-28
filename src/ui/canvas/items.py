@@ -64,6 +64,46 @@ class BoundingBoxItem(QGraphicsRectItem):
         path.addRect(self.boundingRect())
         return path
 
+    def set_mask_display(self, mask_array):
+        import cv2
+        import numpy as np
+        from PySide6.QtGui import QImage, QPixmap
+        from PySide6.QtWidgets import QGraphicsPixmapItem
+        
+        h, w = mask_array.shape[:2]
+        
+        # Ensure mask is 8-bit single channel
+        if mask_array.dtype != np.uint8:
+            mask_array = mask_array.astype(np.uint8)
+            
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        
+        # Draw red contours mapping the detected bounding edge
+        contours, _ = cv2.findContours(mask_array, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(rgba, contours, -1, (255, 0, 0, 255), 2)
+        
+        # Apply semi-transparent red inside the bounds
+        rgba[mask_array > 127] = (255, 0, 0, 100)
+        
+        bytes_per_line = 4 * w
+        qimg = QImage(rgba.data, w, h, bytes_per_line, QImage.Format_RGBA8888)
+        pixmap = QPixmap.fromImage(qimg)
+        
+        if not hasattr(self, 'mask_item'):
+            self.mask_item = QGraphicsPixmapItem(self)
+            self.mask_item.setZValue(-0.5) # Float between bounding box and background
+        
+        self.mask_item.setPixmap(pixmap)
+        self.mask_item.setPos(self.rect().topLeft())
+        self.mask_item.show()
+
+    def clear_mask_display(self):
+        if hasattr(self, 'mask_item'):
+            self.mask_item.hide()
+            from PySide6.QtGui import QPixmap
+            self.mask_item.setPixmap(QPixmap())
+        self.generated_mask = None
+
     def update_typeset(self):
         r = self.rect()
 

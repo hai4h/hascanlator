@@ -34,6 +34,7 @@ class ModelProgressDialog(QDialog):
 class ModelManagementMixin:
     def is_model_downloaded(self, repo_id):
         """Checks if a model repository is already saved to the local HuggingFace cache."""
+        if repo_id == "local": return True # Skip HuggingFace cache verification for local path models
         try:
             hf_cache_info = scan_cache_dir()
             for repo in hf_cache_info.repos:
@@ -51,6 +52,8 @@ class ModelManagementMixin:
             if model_key == "manga_ocr" and self.mocr_model is not None: is_loaded = True
             elif model_key == "yolo_detector" and self.yolo_model is not None: is_loaded = True
             elif model_key == "nmt_translator" and self.nmt_model is not None: is_loaded = True
+            elif model_key == "masking_model" and self.masking_model is not None: is_loaded = True
+            elif model_key == "inpaint_model" and self.inpaint_model is not None: is_loaded = True
 
             if is_loaded: continue
 
@@ -58,6 +61,8 @@ class ModelManagementMixin:
             if (model_key == "manga_ocr" and self.mocr_is_loading) or \
                (model_key == "yolo_detector" and self.yolo_is_loading) or \
                (model_key == "nmt_translator" and self.nmt_is_loading) or \
+               (model_key == "masking_model" and self.masking_is_loading) or \
+               (model_key == "inpaint_model" and self.inpaint_is_loading) or \
                (model_key in self.model_load_queue):
                 is_loading = True
 
@@ -73,7 +78,9 @@ class ModelManagementMixin:
             model_names = {
                 "manga_ocr": "MangaOCR (Text Recognition)",
                 "yolo_detector": "YOLOv8 Bubble Detector",
-                "nmt_translator": "Local Offline NMT Engine"
+                "nmt_translator": "Local Offline NMT Engine",
+                "masking_model": "Text Masking Model (comictextdetector)",
+                "inpaint_model": "Image Inpainting Model (LaMa)"
             }
 
             names_str = "\n".join([f"- {model_names.get(k, k)}" for k, r in missing])
@@ -138,6 +145,8 @@ class ModelManagementMixin:
         if model_name == "manga_ocr": self.mocr_is_loading = True
         elif model_name == "yolo_detector": self.yolo_is_loading = True
         elif model_name == "nmt_translator": self.nmt_is_loading = True
+        elif model_name == "masking_model": self.masking_is_loading = True
+        elif model_name == "inpaint_model": self.inpaint_is_loading = True
 
         self.update_window_title()
         self.model_status_changed.emit()
@@ -158,6 +167,10 @@ class ModelManagementMixin:
             self.yolo_model, self.yolo_is_loading = model, False
         elif name == "nmt_translator":
             self.nmt_model, self.nmt_is_loading = model, False
+        elif name == "masking_model":
+            self.masking_model, self.masking_is_loading = model, False
+        elif name == "inpaint_model":
+            self.inpaint_model, self.inpaint_is_loading = model, False
 
         if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
 
@@ -180,6 +193,8 @@ class ModelManagementMixin:
         if name == "manga_ocr": self.mocr_is_loading = False
         elif name == "yolo_detector": self.yolo_is_loading = False
         elif name == "nmt_translator": self.nmt_is_loading = False
+        elif name == "masking_model": self.masking_is_loading = False
+        elif name == "inpaint_model": self.inpaint_is_loading = False
 
         if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
 
@@ -193,6 +208,8 @@ class ModelManagementMixin:
         if model_name == "manga_ocr": self.mocr_model = None
         elif model_name == "yolo_detector": self.yolo_model = None
         elif model_name == "nmt_translator": self.nmt_model = None
+        elif model_name == "masking_model": self.masking_model = None
+        elif model_name == "inpaint_model": self.inpaint_model = None
 
         gc.collect()
         self.update_window_title()

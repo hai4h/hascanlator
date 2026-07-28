@@ -63,3 +63,78 @@ class DetectionWorker(QThread):
             self.process_finished.emit(merged_boxes)
         except Exception as e:
             self.error.emit(str(e))
+
+
+class MaskingWorker(QThread):
+    process_finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, masking_model, img):
+        super().__init__()
+        self.masking_model = masking_model
+        self.img = img
+
+    def run(self):
+        try:
+            import cv2
+            import numpy as np
+
+            img_rgb = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
+            full_mask = self.masking_model(img_rgb)
+            
+            orig_h, orig_w = self.img.shape[:2]
+            if full_mask.shape[:2] != (orig_h, orig_w):
+                full_mask = cv2.resize(full_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+                
+            if full_mask.dtype != np.uint8:
+                full_mask = (full_mask * 255).astype(np.uint8) if full_mask.max() <= 1.0 else full_mask.astype(np.uint8)
+                
+            _, full_mask = cv2.threshold(full_mask, 100, 255, cv2.THRESH_BINARY)
+            self.process_finished.emit(full_mask)
+
+        except Exception as e:
+            print(f"Masking error: {e}")
+            import cv2
+            gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+            _, full_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            self.process_finished.emit(full_mask)
+
+class InpaintingWorker(QThread):
+    process_finished = Signal(object)
+    progress_percent = Signal(int)
+    error = Signal(str)
+
+    def __init__(self, inpaint_model, img, boxes_data):
+        super().__init__()
+        self.inpaint_model = inpaint_model
+        self.img = img
+        self.boxes_data = boxes_data
+
+    def run(self):
+        try:
+            import cv2
+            import numpy as np
+            
+            res_img = self.img.copy()
+            total = len(self.boxes_data)
+            
+            for i, (x, y, w, h, mask) in enumerate(self.boxes_data):
+                roi = res_img[y:y+h, x:x+w]
+                if mask.shape[:2] != (h, w):
+                    mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+
+                try:
+                    roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+                    inpainted_roi_rgb = self.inpaint_model(roi_rgb, mask)
+                    inpainted_roi = cv2.cvtColor(inpainted_roi_rgb, cv2.COLOR_RGB2BGR)
+                except Exception as e:
+                    print(f"Inpaint error: {e}")
+                    mask_np = mask.astype(np.uint8)
+                    inpainted_roi = cv2.inpaint(roi, mask_np, 7, cv2.INPAINT_TELEA)
+
+                res_img[y:y+h, x:x+w] = inpainted_roi
+                self.progress_percent.emit(int(((i + 1) / total) * 100))
+                
+            self.process_finished.emit(res_img)
+        except Exception as e:
+            self.error.emit(str(e))

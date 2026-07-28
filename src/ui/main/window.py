@@ -53,6 +53,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.mocr_model, self.mocr_is_loading = None, False
         self.yolo_model, self.yolo_is_loading = None, False
         self.nmt_model, self.nmt_is_loading = None, False
+        self.masking_model, self.masking_is_loading = None, False
+        self.inpaint_model, self.inpaint_is_loading = None, False
 
         self.model_load_queue = []
         self.is_loading_model_seq = False
@@ -134,7 +136,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "keybind_translate_box": "",
             "keybind_trans_type_sel": "",
             "keybind_trans_type_all": "",
-            "keybind_smart_clean": "",
+            "keybind_generate_mask": "",
+            "keybind_inpaint_bubble": "",
             "keybind_toggle_typeset": "",
             "keybind_bold": "",
             "keybind_italic": "",
@@ -176,7 +179,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             ("keybind_translate_box", self.run_translation_on_selected),
             ("keybind_trans_type_sel", self.run_translate_typeset_selected),
             ("keybind_trans_type_all", self.run_translate_typeset_all),
-            ("keybind_smart_clean", self.smart_clean_bubble),
+            ("keybind_generate_mask", self.generate_bubble_mask),
+            ("keybind_inpaint_bubble", self.inpaint_bubble_mask),
             ("keybind_toggle_typeset", self.toggle_typeset_view),
             ("keybind_bold", self.toggle_text_bold),
             ("keybind_italic", self.toggle_text_italic),
@@ -375,7 +379,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.history_dock.history_list.itemClicked.connect(self.on_history_item_clicked)
 
         # --- TYPESET SIGNALS ---
-        self.typeset_toolbar.btn_clean_bubble.clicked.connect(self.smart_clean_bubble)
+        self.typeset_toolbar.btn_mask_bubble.clicked.connect(self.generate_bubble_mask)
+        self.typeset_toolbar.btn_inpaint_bubble.clicked.connect(self.inpaint_bubble_mask)
         self.typeset_toolbar.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
 
         # --- TEXT ALIGN SIGNALS ---

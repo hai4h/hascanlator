@@ -4,3 +4,4 @@ pip install manga-ocr pillow
 pip install ultralytics huggingface_hub
 pip install sentencepiece sacremoses protobuf
 pip install deep-translator
+pip install wandb torchsummary pyclipper shapely

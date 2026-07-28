@@ -62,7 +62,16 @@ class WorkerProcessingMixin:
         flags = getattr(self, '_pipeline_flags', {})
 
         if flags.get('clean') and boxes:
-            self.smart_clean_bubble(boxes=boxes, commit=False)
+            # Starts the asynchronous mask & inpaint chain.
+            # Once inpainting finishes, it calls _execute_pipeline_post_inpaint()
+            self.inpaint_bubble_mask(boxes=boxes, commit=False)
+            return
+
+        self._execute_pipeline_post_inpaint()
+
+    def _execute_pipeline_post_inpaint(self):
+        boxes = getattr(self, '_active_pipeline_boxes', [])
+        flags = getattr(self, '_pipeline_flags', {})
 
         if flags.get('typeset') and boxes:
             for box in boxes:

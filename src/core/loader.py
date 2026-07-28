@@ -82,5 +82,74 @@ class ModelLoaderWorker(QThread):
 
                 self.process_finished.emit(NMTWrapper(tokenizer, model, repo_id), self.model_name)
 
+            elif self.model_name == "masking_model":
+                import os
+                import sys
+                
+                model_path = "./models/comictextdetector.pt"
+                repo_path = os.path.abspath("./comic_text_detector")
+                
+                if not os.path.exists(repo_path):
+                    raise RuntimeError("Testing Mode: 'comic_text_detector' folder not found. Please run 'git clone https://github.com/dmMaze/comic-text-detector.git comic_text_detector' in your terminal.")
+
+                if not os.path.exists(model_path):
+                    raise RuntimeError(f"Testing Mode: Model not found at {model_path}. Please place 'comictextdetector.pt' inside the /models directory.")
+                
+                # Add the repository to the Python path so its internal flat imports work natively
+                if repo_path not in sys.path:
+                    sys.path.insert(0, repo_path)
+
+                class ComicTextDetectorWrapper:
+                    def __init__(self, path):
+                        self.path = path
+                        try:
+                            from inference import TextDetector
+                            self.model = TextDetector(model_path=path, device='cpu', act='leaky')
+                        except Exception as e:
+                            self.model = None
+                            print(f"comic_text_detector module error: {e}. Falling back to OpenCV thresholding.")
+
+                    def __call__(self, img_crop):
+                        if self.model is None:
+                            import cv2
+                            gray = cv2.cvtColor(img_crop, cv2.COLOR_BGR2GRAY)
+                            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                            return binary
+                            
+                        try:
+                            result = self.model(img_crop)
+                            return result[0]
+                        except Exception as e:
+                            print(f"Masking inference error: {e}")
+                            import numpy as np
+                            return np.zeros(img_crop.shape[:2], dtype=np.uint8)
+                
+                model = ComicTextDetectorWrapper(model_path)
+                self.process_finished.emit(model, self.model_name)
+
+            elif self.model_name == "inpaint_model":
+                import os
+                model_path = "./models/inpainting_lama_mpe.ckpt"
+                
+                if not os.path.exists(model_path):
+                    raise RuntimeError(f"Testing Mode: Model not found at {model_path}. Please place 'inpainting_lama_mpe.ckpt' inside the /models directory.")
+                
+                class LamaInpainterWrapper:
+                    def __init__(self, path):
+                        self.path = path
+                        # Hook for manga-image-translator's LaMa inpainter module here
+                        
+                    def __call__(self, img_crop, mask):
+                        import cv2
+                        import numpy as np
+                        # If Lama is not fully connected in Python yet, cv2.inpaint is used as a placeholder 
+                        # so you can verify the pipeline end-to-end
+                        mask_np = mask.astype(np.uint8)
+                        inpainted = cv2.inpaint(img_crop, mask_np, 7, cv2.INPAINT_TELEA)
+                        return inpainted
+                        
+                model = LamaInpainterWrapper(model_path)
+                self.process_finished.emit(model, self.model_name)
+
         except Exception as e:
             self.error.emit(self.model_name, str(e))

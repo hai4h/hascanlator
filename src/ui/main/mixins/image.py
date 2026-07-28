@@ -51,8 +51,7 @@ class ImageOperationsMixin:
             if idx < len(self.workspace.history.get(path, [])):
                 self.load_history_step(idx)
 
-    def smart_clean_bubble(self, boxes=None, commit=True):
-        # UI signals occasionally pass `checked` (bool) as the first argument, handle it safely
+    def generate_bubble_mask(self, boxes=None, auto_inpaint=False):
         if isinstance(boxes, bool) or boxes is None:
             target_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
         else:
@@ -61,188 +60,173 @@ class ImageOperationsMixin:
         if not self.workspace.current_image_path or not target_boxes:
             return
 
-        path = self.workspace.current_image_path
+        if not self.masking_model:
+            if not self.ensure_models_ready([("masking_model", "local")]): return
 
+        self._pending_mask_boxes = target_boxes
+        self._pending_auto_inpaint = auto_inpaint
+        
+        path = self.workspace.current_image_path
         img = self.workspace.edited_images[path].copy()
 
-        for box in target_boxes:
-            rect = box.sceneBoundingRect()
-            x, y, w, h = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
+        self.set_processing_lock(True)
+        self.update_window_title("Generating Text Mask...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.statusBar().showMessage("Running ML masking model on full page...")
 
-            # 2. Boundary Safety Check
+        from src.core.detection import MaskingWorker
+        self.mask_worker = MaskingWorker(self.masking_model, img)
+        self.mask_worker.process_finished.connect(self.on_mask_generated)
+        self.mask_worker.error.connect(self.on_mask_error)
+        self.mask_worker.start()
+
+    def on_mask_generated(self, full_mask):
+        import cv2
+        target_boxes = getattr(self, '_pending_mask_boxes', [])
+        
+        path = self.workspace.current_image_path
+        if not path or path not in self.workspace.edited_images:
+            self._cleanup_masking_state()
+            return
+            
+        img = self.workspace.edited_images[path]
+
+        for box in target_boxes:
+            rect = box.rect()
+            scene_tl = box.mapToScene(rect.topLeft())
+            scene_br = box.mapToScene(rect.bottomRight())
+            
+            x, y = int(scene_tl.x()), int(scene_tl.y())
+            w, h = int(scene_br.x() - scene_tl.x()), int(scene_br.y() - scene_tl.y())
+
             x, y = max(0, x), max(0, y)
             w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
             if w <= 0 or h <= 0: continue
 
-            roi = img[y:y+h, x:x+w]
+            mask_roi = full_mask[y:y+h, x:x+w].copy()
 
-            # 3. Smart Masking Pipeline
-            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            mask_roi = cv2.dilate(mask_roi, kernel, iterations=2)
 
-            # Heuristic check: Is this a standard white bubble?
-            # We check the perimeter pixels of the bounding box. If mostly white, it's a bubble.
-            top, bottom = gray[0, :], gray[-1, :]
-            left, right = gray[:, 0], gray[:, -1]
-            border_pixels = np.concatenate([top, bottom, left, right])
-            white_ratio = np.sum(border_pixels > 200) / max(1, len(border_pixels))
+            box.generated_mask = mask_roi
+            box.set_mask_display(mask_roi)
 
-            is_standard_bubble = white_ratio > 0.65
-            clean_mask = np.zeros_like(gray)
-
-            if is_standard_bubble:
-                #  CLASSICAL METHOD (White Bubbles)
-                # Extremely accurate for standard black text on white backgrounds.
-                _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-                for contour in contours:
-                    cx, cy, cw, ch = cv2.boundingRect(contour)
-                    margin = 3
-                    touches_edge = (cx <= margin) or (cy <= margin) or (cx + cw >= w - margin) or (cy + ch >= h - margin)
-                    area = cv2.contourArea(contour)
-                    too_huge = area > (w * h * 0.5)
-
-                    if not touches_edge and not too_huge:
-                        cv2.drawContours(clean_mask, [contour], -1, 255, thickness=cv2.FILLED)
-
-                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-                clean_mask = cv2.dilate(clean_mask, kernel, iterations=2)
-            else:
-                # COMPLEX BACKGROUND METHOD (Screentones / Dark Arts)                 # Uses Morphological Gradient to find high-frequency edges (detects both black and white text natively)
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-                grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
-                _, binary = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-                # Clean up noise and form solid text stroke masks
-                clean_mask = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
-                # Dilate slightly more (iterations=2) to guarantee no anti-aliased text pixels leak into the inpaint
-                clean_mask = cv2.dilate(clean_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=2)
-
-            # 4. Modual Inpainting Execution (Prepared for Future AI Model)
-            # Future AI Hook: if self.settings.value("use_ai_inpaint"): cleaned_roi = self._run_ai_inpaint(roi, clean_mask)
-            # Classic Fallback:
-            if is_standard_bubble:
-                cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_TELEA)
-            else:
-                # Navier-Stokes (NS) blends fluid backgrounds/gradients slightly better than Telea
-                cleaned_roi = cv2.inpaint(roi, clean_mask, 7, cv2.INPAINT_NS)
-
-            img[y:y+h, x:x+w] = cleaned_roi
-
-            # Store flag inside the box so the auto-expander knows whether to expand or not
-            box._is_standard_bubble = is_standard_bubble
-
-        # 5. Auto-Expand Bounding Boxes to fill the clean bubble
-        gray_clean = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        # Milder median blur: destroys screentone dots but keeps thin bubble walls intact (11 was too destructive)
-        blurred = cv2.medianBlur(gray_clean, 5)
-        max_h, max_w = gray_clean.shape
-
-        for box in target_boxes:
-            rect = box.sceneBoundingRect()
-            bx, by, bw, bh = int(rect.x()), int(rect.y()), int(rect.width()), int(rect.height())
-
-            curr_x1, curr_y1 = max(0, bx), max(0, by)
-            curr_x2, curr_y2 = min(max_w, bx + bw), min(max_h, by + bh)
-
-            # Unify Auto-Expansion: Dynamically sample the cleaned background to find the wall threshold
-            center_roi = blurred[curr_y1:curr_y2, curr_x1:curr_x2]
-            base_gray = np.median(center_roi) if center_roi.size > 0 else 255
-
-            if base_gray < 50:
-                # Dark bubble, walls are likely white/bright
-                wall_thresh = min(255, base_gray + 50)
-                _, obstacle_map = cv2.threshold(blurred, wall_thresh, 255, cv2.THRESH_BINARY)
-            else:
-                # White/Gray/Screentone bubble, walls are likely black/dark
-                wall_thresh = max(0, base_gray - 50)
-                _, obstacle_map = cv2.threshold(blurred, wall_thresh, 255, cv2.THRESH_BINARY_INV)
-
-            # Strict tolerance to ensure it stops exactly at thin lines
-            tolerance = 0.02
-
-            can_exp_left = can_exp_right = can_exp_top = can_exp_bottom = True
-            step = 1 # 1 pixel step prevents jumping over 1-pixel thin borders
-            max_dim = max(bw, bh) * 2 # Prevent infinite expansion if the bubble is open
-
-            while can_exp_left or can_exp_right or can_exp_top or can_exp_bottom:
-                # Ignore the corners of the bounding box to allow deeper expansion into oval bubbles
-                # Reduced back to 15% to prevent the collision-check line from becoming too small and slipping through gaps
-                y_margin = int((curr_y2 - curr_y1) * 0.15)
-                chk_y1 = curr_y1 + y_margin
-                chk_y2 = curr_y2 - y_margin
-                if chk_y2 <= chk_y1: chk_y1, chk_y2 = curr_y1, curr_y2
-
-                x_margin = int((curr_x2 - curr_x1) * 0.15)
-                chk_x1 = curr_x1 + x_margin
-                chk_x2 = curr_x2 - x_margin
-                if chk_x2 <= chk_x1: chk_x1, chk_x2 = curr_x1, curr_x2
-
-                if can_exp_left:
-                    nx = max(0, curr_x1 - step)
-                    if nx == curr_x1 or (curr_x2 - nx) > max_dim:
-                        can_exp_left = False
-                    else:
-                        edge = obstacle_map[chk_y1:chk_y2, nx:curr_x1]
-                        if np.sum(edge > 0) / max(1, edge.size) > tolerance:
-                            can_exp_left = False
-                        else:
-                            curr_x1 = nx
-
-                if can_exp_right:
-                    nx = min(max_w, curr_x2 + step)
-                    if nx == curr_x2 or (nx - curr_x1) > max_dim:
-                        can_exp_right = False
-                    else:
-                        edge = obstacle_map[chk_y1:chk_y2, curr_x2:nx]
-                        if np.sum(edge > 0) / max(1, edge.size) > tolerance:
-                            can_exp_right = False
-                        else:
-                            curr_x2 = nx
-
-                if can_exp_top:
-                    ny = max(0, curr_y1 - step)
-                    if ny == curr_y1 or (curr_y2 - ny) > max_dim:
-                        can_exp_top = False
-                    else:
-                        edge = obstacle_map[ny:curr_y1, chk_x1:chk_x2]
-                        if np.sum(edge > 0) / max(1, edge.size) > tolerance:
-                            can_exp_top = False
-                        else:
-                            curr_y1 = ny
-
-                if can_exp_bottom:
-                    ny = min(max_h, curr_y2 + step)
-                    if ny == curr_y2 or (ny - curr_y1) > max_dim:
-                        can_exp_bottom = False
-                    else:
-                        edge = obstacle_map[curr_y2:ny, chk_x1:chk_x2]
-                        if np.sum(edge > 0) / max(1, edge.size) > tolerance:
-                            can_exp_bottom = False
-                        else:
-                            curr_y2 = ny
-
-            # Add padding so Typeset Text doesn't touch the bubble walls
-            pad = 4
-            final_x1, final_y1 = curr_x1 + pad, curr_y1 + pad
-            final_x2, final_y2 = curr_x2 - pad, curr_y2 - pad
-
-            # Failsafe: Ensure it didn't collapse on itself
-            if final_x2 <= final_x1: final_x1, final_x2 = curr_x1, curr_x2
-            if final_y2 <= final_y1: final_y1, final_y2 = curr_y1, curr_y2
-
-            box.setRect(QRectF(final_x1, final_y1, final_x2 - final_x1, final_y2 - final_y1))
-            if box.is_typeset:
-                box.update_typeset()
-
-        # 7. Save and Render
-        self.workspace.edited_images[path] = img
-        self.show_edited_image()
+        auto_inpaint = getattr(self, '_pending_auto_inpaint', False)
+        self._cleanup_masking_state()
         self.update_button_states()
 
+        if auto_inpaint:
+            commit_state = getattr(self, '_pending_inpaint_commit', True)
+            self.inpaint_bubble_mask(boxes=target_boxes, commit=commit_state)
+
+    def _cleanup_masking_state(self):
+        self._pending_mask_boxes = []
+        self._pending_auto_inpaint = False
+        self.progress_bar.setVisible(False)
+        self.set_processing_lock(False)
+        self.update_window_title()
+        self.statusBar().showMessage("Ready")
+
+    def on_mask_error(self, err_msg):
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.critical(self, "Masking Error", str(err_msg))
+        self._cleanup_masking_state()
+
+    def inpaint_bubble_mask(self, boxes=None, commit=True):
+        if isinstance(boxes, bool) or boxes is None:
+            target_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
+        else:
+            target_boxes = boxes
+
+        if not self.workspace.current_image_path or not target_boxes:
+            return
+
+        boxes_needing_mask = [b for b in target_boxes if getattr(b, 'generated_mask', None) is None]
+        if boxes_needing_mask:
+            self._pending_inpaint_commit = commit
+            self.generate_bubble_mask(boxes=target_boxes, auto_inpaint=True)
+            return
+
+        if not self.inpaint_model:
+            if not self.ensure_models_ready([("inpaint_model", "local")]): return
+
+        path = self.workspace.current_image_path
+        img = self.workspace.edited_images[path].copy()
+
+        boxes_data = []
+        for box in target_boxes:
+            mask = getattr(box, 'generated_mask', None)
+            if mask is None: continue
+
+            rect = box.rect()
+            scene_tl = box.mapToScene(rect.topLeft())
+            scene_br = box.mapToScene(rect.bottomRight())
+            
+            x, y = int(scene_tl.x()), int(scene_tl.y())
+            w, h = int(scene_br.x() - scene_tl.x()), int(scene_br.y() - scene_tl.y())
+            
+            x, y = max(0, x), max(0, y)
+            w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
+            if w <= 0 or h <= 0: continue
+            
+            boxes_data.append((x, y, w, h, mask))
+
+        if not boxes_data:
+            return
+
+        self._pending_inpaint_commit = commit
+        self._pending_inpaint_boxes = target_boxes
+        
+        self.set_processing_lock(True)
+        self.update_window_title("Inpainting...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.statusBar().showMessage(f"Inpainting {len(boxes_data)} regions...")
+
+        from src.core.detection import InpaintingWorker
+        self.inpaint_worker = InpaintingWorker(self.inpaint_model, img, boxes_data)
+        self.inpaint_worker.progress_percent.connect(self.progress_bar.setValue)
+        self.inpaint_worker.process_finished.connect(self.on_inpaint_finished)
+        self.inpaint_worker.error.connect(self.on_inpaint_error)
+        self.inpaint_worker.start()
+
+    def on_inpaint_finished(self, res_img):
+        path = self.workspace.current_image_path
+        if not path:
+            self._cleanup_inpaint_state()
+            return
+            
+        self.workspace.edited_images[path] = res_img
+        
+        target_boxes = getattr(self, '_pending_inpaint_boxes', [])
+        for box in target_boxes:
+            box.clear_mask_display()
+            
+        self.show_edited_image()
+
+        commit = getattr(self, '_pending_inpaint_commit', True)
         if commit:
-            self.commit_history(f"Smart Clean ({len(target_boxes)} Boxes)")
+            self.commit_history(f"Inpaint ML ({len(target_boxes)} Boxes)")
+
+        self._cleanup_inpaint_state()
+
+        if getattr(self, '_is_auto_scan_pipeline', False):
+            self._execute_pipeline_post_inpaint()
+
+    def _cleanup_inpaint_state(self):
+        self._pending_inpaint_boxes = []
+        self._pending_inpaint_commit = False
+        self.progress_bar.setVisible(False)
+        self.set_processing_lock(False)
+        self.update_window_title()
+        self.statusBar().showMessage("Ready")
+
+    def on_inpaint_error(self, err_msg):
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.critical(self, "Inpaint Error", str(err_msg))
+        self._cleanup_inpaint_state()
 
     #  TYPESETTING CONTROLS
     def toggle_typeset_view(self):

@@ -137,6 +137,8 @@ class SettingsDialog(QDialog):
 
         add_model_ui(self.models_layout, "MangaOCR (Text Recognition)", "Reads Japanese text inside the boxes.", "manga_ocr", "kha-white/manga-ocr-base", "auto_load_mocr")
         add_model_ui(self.models_layout, "YOLOv8 Bubble Detector", "Accurate speech bubble locator.", "yolo_detector", "ogkalu/manga-text-detector-yolov8s", "auto_load_yolo")
+        add_model_ui(self.models_layout, "Text Masking Model (comictextdetector)", "Accurately masks text before inpainting.", "masking_model", "local", "auto_load_masking")
+        add_model_ui(self.models_layout, "Image Inpainting Model (LaMa)", "Seamlessly removes text using masks.", "inpaint_model", "local", "auto_load_inpaint")
         self.models_layout.addStretch()
 
         # ==========================================
@@ -464,7 +466,8 @@ class SettingsDialog(QDialog):
         add_bind("Translate Selected Box:", "keybind_translate_box")
         add_bind("Translate + Typeset Selected:", "keybind_trans_type_sel")
         add_bind("Translate + Typeset All:", "keybind_trans_type_all")
-        add_bind("Smart Clean Bubble:", "keybind_smart_clean")
+        add_bind("Generate Text Mask:", "keybind_generate_mask")
+        add_bind("Inpaint Mask:", "keybind_inpaint_bubble")
 
         add_header("Typesetting and Formatting")
         add_bind("Toggle Typeset Visibility:", "keybind_toggle_typeset")
@@ -733,5 +736,15 @@ class SettingsDialog(QDialog):
             nmt_loading = self.main_window.nmt_is_loading
             nmt_queued = "nmt_translator" in q
             self._apply_state(nmt_loaded, nmt_loading, nmt_queued, self.model_widgets["nmt_translator"])
+
+            masking_loaded = self.main_window.masking_model is not None
+            masking_loading = self.main_window.masking_is_loading
+            masking_queued = "masking_model" in q
+            self._apply_state(masking_loaded, masking_loading, masking_queued, self.model_widgets["masking_model"])
+
+            inpaint_loaded = self.main_window.inpaint_model is not None
+            inpaint_loading = self.main_window.inpaint_is_loading
+            inpaint_queued = "inpaint_model" in q
+            self._apply_state(inpaint_loaded, inpaint_loading, inpaint_queued, self.model_widgets["inpaint_model"])
         except RuntimeError:
             pass
