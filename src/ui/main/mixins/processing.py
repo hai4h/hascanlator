@@ -112,9 +112,9 @@ class WorkerProcessingMixin:
             do_mask = True
             
         if do_mask:
-            reqs.append(("masking_model", "local"))
+            reqs.append(("masking_model", "local_masking"))
         if do_inpaint:
-            reqs.append(("inpaint_model", "local"))
+            reqs.append(("inpaint_model", "local_inpaint"))
 
         if not self.ensure_models_ready(reqs): return
 

@@ -12,3 +12,4 @@ fonts/
 config.ini
 rev/
 models/
+.venv314/

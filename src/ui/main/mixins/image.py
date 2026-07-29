@@ -61,7 +61,7 @@ class ImageOperationsMixin:
             return
 
         if not self.masking_model:
-            if not self.ensure_models_ready([("masking_model", "local")]): return
+            if not self.ensure_models_ready([("masking_model", "local_masking")]): return
 
         self._pending_mask_boxes = target_boxes
         self._pending_auto_inpaint = auto_inpaint
@@ -74,7 +74,7 @@ class ImageOperationsMixin:
         self.update_window_title("Generating Text Mask...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
-        self.statusBar().showMessage("Running ML masking model on full page...")
+        self.statusBar().showMessage("Running masking model on full page...")
 
         from src.core.detection import MaskingWorker
         self.mask_worker = MaskingWorker(self.masking_model, img)
@@ -158,7 +158,7 @@ class ImageOperationsMixin:
             return
 
         if not self.inpaint_model:
-            if not self.ensure_models_ready([("inpaint_model", "local")]): return
+            if not self.ensure_models_ready([("inpaint_model", "local_inpaint")]): return
 
         path = self.workspace.current_image_path
         img = self.workspace.edited_images[path].copy()
@@ -217,7 +217,7 @@ class ImageOperationsMixin:
 
         commit = getattr(self, '_pending_inpaint_commit', True)
         if commit:
-            self.commit_history(f"Inpaint ML ({len(target_boxes)} Boxes)")
+            self.commit_history(f"Inpaint ({len(target_boxes)} Boxes)")
 
         self._cleanup_inpaint_state()
 

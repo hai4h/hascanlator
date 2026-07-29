@@ -80,8 +80,8 @@ class TypesetToolBar(QWidget):
         self.btn_cycle_pos = create_btn("⟲", "Move Toolbar Position")
         self.btn_cycle_pos.clicked.connect(self._cycle_position)
 
-        self.btn_mask_bubble = create_btn("◩", "Generate Text Mask (ML)")
-        self.btn_inpaint_bubble = create_btn("🖌", "Inpaint Mask (ML)")
+        self.btn_mask_bubble = create_btn("◩", "Generate Text Mask")
+        self.btn_inpaint_bubble = create_btn("🖌", "Inpaint Mask")
         self.btn_toggle_typeset = create_btn("⊙", "Toggle Typeset Visibility")
 
         # ==========================================

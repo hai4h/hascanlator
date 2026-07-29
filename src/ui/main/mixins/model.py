@@ -31,12 +31,23 @@ class ModelProgressDialog(QDialog):
     def set_status(self, text):
         self.lbl_status.setText(text)
 
+    def set_progress(self, val):
+        if self.progress.maximum() == 0:
+            self.progress.setRange(0, 100)
+        self.progress.setValue(val)
+
 class ModelManagementMixin:
     def is_model_downloaded(self, repo_id):
-        """Checks if a model repository is already saved to the local HuggingFace cache."""
-        if repo_id == "local": return True # Skip HuggingFace cache verification for local path models
+        """Checks if a model repository is already saved to the local cache."""
+        import os
+        if repo_id == "local_masking": return os.path.exists("./models/comictextdetector.pt.onnx")
+        if repo_id == "local_inpaint": return os.path.exists("./models/lama_fp32.onnx")
+        if repo_id == "local": return True
         try:
-            hf_cache_info = scan_cache_dir()
+            cache_dir = os.path.abspath(os.path.join(os.getcwd(), "models", "hf_cache"))
+            if not os.path.exists(cache_dir): return False
+            
+            hf_cache_info = scan_cache_dir(cache_dir)
             for repo in hf_cache_info.repos:
                 if repo.repo_id == repo_id: return True
             return False
@@ -133,11 +144,14 @@ class ModelManagementMixin:
         readable_names = {
             "manga_ocr": "MangaOCR (Text Recognition)",
             "yolo_detector": "YOLOv8 Bubble Detector",
-            "nmt_translator": "Local Offline NMT Engine"
+            "nmt_translator": "Local Offline NMT Engine",
+            "masking_model": "Text Masking Model (comictextdetector)",
+            "inpaint_model": "Image Inpainting Model (LaMa)"
         }
         r_name = readable_names.get(model_name, model_name)
 
         self.model_progress_dialog.set_status(f"Downloading / Loading:<br><b>{r_name}</b>...<br><br>(This might take a while for the first time downloading)")
+        self.model_progress_dialog.progress.setRange(0, 0)
         self.model_progress_dialog.show()
         self.model_progress_dialog.raise_()
         self.model_progress_dialog.activateWindow()
@@ -156,6 +170,9 @@ class ModelManagementMixin:
         loader = ModelLoaderWorker(model_name, nmt_repo_id=nmt_repo_id)
 
         self.loader_threads.append(loader)
+        if hasattr(loader, 'progress_percent'):
+            loader.progress_percent.connect(self.model_progress_dialog.set_progress)
+
         loader.process_finished.connect(lambda m, n, t=loader: self.on_model_loaded(m, n, t))
         loader.error.connect(lambda n, e, t=loader: self.on_model_error(n, e, t))
         loader.start()

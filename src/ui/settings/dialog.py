@@ -137,8 +137,8 @@ class SettingsDialog(QDialog):
 
         add_model_ui(self.models_layout, "MangaOCR (Text Recognition)", "Reads Japanese text inside the boxes.", "manga_ocr", "kha-white/manga-ocr-base", "auto_load_mocr")
         add_model_ui(self.models_layout, "YOLOv8 Bubble Detector", "Accurate speech bubble locator.", "yolo_detector", "ogkalu/manga-text-detector-yolov8s", "auto_load_yolo")
-        add_model_ui(self.models_layout, "Text Masking Model (comictextdetector)", "Accurately masks text before inpainting.", "masking_model", "local", "auto_load_masking")
-        add_model_ui(self.models_layout, "Image Inpainting Model (LaMa)", "Seamlessly removes text using masks.", "inpaint_model", "local", "auto_load_inpaint")
+        add_model_ui(self.models_layout, "Text Masking Model (comictextdetector)", "Accurately masks text before inpainting.", "masking_model", "local_masking", "auto_load_masking")
+        add_model_ui(self.models_layout, "Image Inpainting Model (LaMa)", "Seamlessly removes text using masks.", "inpaint_model", "local_inpaint", "auto_load_inpaint")
         self.models_layout.addStretch()
 
         # ==========================================
@@ -657,6 +657,8 @@ class SettingsDialog(QDialog):
                 if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
                 if key == "yolo_detector" and self.main_window.yolo_model: is_loaded = True
                 if key == "nmt_translator" and self.main_window.nmt_model: is_loaded = True
+                if key == "masking_model" and self.main_window.masking_model: is_loaded = True
+                if key == "inpaint_model" and self.main_window.inpaint_model: is_loaded = True
                 if not is_loaded: self.main_window.load_model(key)
 
     def unload_all_models(self):
@@ -665,6 +667,8 @@ class SettingsDialog(QDialog):
             if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
             if key == "yolo_detector" and self.main_window.yolo_model: is_loaded = True
             if key == "nmt_translator" and self.main_window.nmt_model: is_loaded = True
+            if key == "masking_model" and self.main_window.masking_model: is_loaded = True
+            if key == "inpaint_model" and self.main_window.inpaint_model: is_loaded = True
             if is_loaded: self.main_window.unload_model(key)
 
     def delete_model(self, load_key, repo_id):
@@ -672,13 +676,24 @@ class SettingsDialog(QDialog):
         if reply == QMessageBox.Yes:
             self.main_window.unload_model(load_key)
             try:
-                hf_cache_info = scan_cache_dir()
-                for repo in hf_cache_info.repos:
-                    if repo.repo_id == repo_id:
-                        strategy = hf_cache_info.delete_revisions(*[rev.commit_hash for rev in repo.revisions])
-                        strategy.execute()
-                        break
-                QMessageBox.information(self, "Success", "Model successfully deleted from disk.")
+                if repo_id == "local_masking":
+                    if os.path.exists("./models/comictextdetector.pt.onnx"):
+                        os.remove("./models/comictextdetector.pt.onnx")
+                    QMessageBox.information(self, "Success", "Model successfully deleted from disk.")
+                elif repo_id == "local_inpaint":
+                    if os.path.exists("./models/lama_fp32.onnx"):
+                        os.remove("./models/lama_fp32.onnx")
+                    QMessageBox.information(self, "Success", "Model successfully deleted from disk.")
+                else:
+                    cache_dir = os.path.abspath(os.path.join(os.getcwd(), "models", "hf_cache"))
+                    if os.path.exists(cache_dir):
+                        hf_cache_info = scan_cache_dir(cache_dir)
+                        for repo in hf_cache_info.repos:
+                            if repo.repo_id == repo_id:
+                                strategy = hf_cache_info.delete_revisions(*[rev.commit_hash for rev in repo.revisions])
+                                strategy.execute()
+                                break
+                    QMessageBox.information(self, "Success", "Model successfully deleted from disk.")
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Could not delete model cache: {e}")
             self.update_ui_state()
