@@ -51,7 +51,7 @@ class ImageOperationsMixin:
             if idx < len(self.workspace.history.get(path, [])):
                 self.load_history_step(idx)
 
-    def generate_bubble_mask(self, boxes=None, auto_inpaint=False):
+    def generate_bubble_mask(self, boxes=None, auto_inpaint=False, commit=True):
         if isinstance(boxes, bool) or boxes is None:
             target_boxes = [item for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]
         else:
@@ -65,7 +65,8 @@ class ImageOperationsMixin:
 
         self._pending_mask_boxes = target_boxes
         self._pending_auto_inpaint = auto_inpaint
-        
+        self._pending_mask_commit = commit
+
         path = self.workspace.current_image_path
         img = self.workspace.edited_images[path].copy()
 
@@ -84,19 +85,19 @@ class ImageOperationsMixin:
     def on_mask_generated(self, full_mask):
         import cv2
         target_boxes = getattr(self, '_pending_mask_boxes', [])
-        
+
         path = self.workspace.current_image_path
         if not path or path not in self.workspace.edited_images:
             self._cleanup_masking_state()
             return
-            
+
         img = self.workspace.edited_images[path]
 
         for box in target_boxes:
             rect = box.rect()
             scene_tl = box.mapToScene(rect.topLeft())
             scene_br = box.mapToScene(rect.bottomRight())
-            
+
             x, y = int(scene_tl.x()), int(scene_tl.y())
             w, h = int(scene_br.x() - scene_tl.x()), int(scene_br.y() - scene_tl.y())
 
@@ -106,23 +107,31 @@ class ImageOperationsMixin:
 
             mask_roi = full_mask[y:y+h, x:x+w].copy()
 
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-            mask_roi = cv2.dilate(mask_roi, kernel, iterations=2)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            mask_roi = cv2.dilate(mask_roi, kernel, iterations=3)
 
             box.generated_mask = mask_roi
             box.set_mask_display(mask_roi)
 
         auto_inpaint = getattr(self, '_pending_auto_inpaint', False)
+        commit = getattr(self, '_pending_mask_commit', True)
+
         self._cleanup_masking_state()
         self.update_button_states()
 
         if auto_inpaint:
             commit_state = getattr(self, '_pending_inpaint_commit', True)
             self.inpaint_bubble_mask(boxes=target_boxes, commit=commit_state)
+        else:
+            if commit:
+                self.commit_history(f"Generate Mask ({len(target_boxes)} Boxes)")
+            if getattr(self, '_is_auto_scan_pipeline', False):
+                self._execute_pipeline_post_inpaint()
 
     def _cleanup_masking_state(self):
         self._pending_mask_boxes = []
         self._pending_auto_inpaint = False
+        self._pending_mask_commit = False
         self.progress_bar.setVisible(False)
         self.set_processing_lock(False)
         self.update_window_title()
@@ -145,7 +154,7 @@ class ImageOperationsMixin:
         boxes_needing_mask = [b for b in target_boxes if getattr(b, 'generated_mask', None) is None]
         if boxes_needing_mask:
             self._pending_inpaint_commit = commit
-            self.generate_bubble_mask(boxes=target_boxes, auto_inpaint=True)
+            self.generate_bubble_mask(boxes=target_boxes, auto_inpaint=True, commit=False)
             return
 
         if not self.inpaint_model:
@@ -162,14 +171,14 @@ class ImageOperationsMixin:
             rect = box.rect()
             scene_tl = box.mapToScene(rect.topLeft())
             scene_br = box.mapToScene(rect.bottomRight())
-            
+
             x, y = int(scene_tl.x()), int(scene_tl.y())
             w, h = int(scene_br.x() - scene_tl.x()), int(scene_br.y() - scene_tl.y())
-            
+
             x, y = max(0, x), max(0, y)
             w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
             if w <= 0 or h <= 0: continue
-            
+
             boxes_data.append((x, y, w, h, mask))
 
         if not boxes_data:
@@ -177,7 +186,7 @@ class ImageOperationsMixin:
 
         self._pending_inpaint_commit = commit
         self._pending_inpaint_boxes = target_boxes
-        
+
         self.set_processing_lock(True)
         self.update_window_title("Inpainting...")
         self.progress_bar.setVisible(True)
@@ -197,13 +206,13 @@ class ImageOperationsMixin:
         if not path:
             self._cleanup_inpaint_state()
             return
-            
+
         self.workspace.edited_images[path] = res_img
-        
+
         target_boxes = getattr(self, '_pending_inpaint_boxes', [])
         for box in target_boxes:
             box.clear_mask_display()
-            
+
         self.show_edited_image()
 
         commit = getattr(self, '_pending_inpaint_commit', True)

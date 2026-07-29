@@ -61,10 +61,13 @@ class WorkerProcessingMixin:
         boxes = getattr(self, '_active_pipeline_boxes', [])
         flags = getattr(self, '_pipeline_flags', {})
 
-        if flags.get('clean') and boxes:
-            # Starts the asynchronous mask & inpaint chain.
-            # Once inpainting finishes, it calls _execute_pipeline_post_inpaint()
+        if flags.get('inpaint') and boxes:
+            # Chains mask -> inpaint -> typeset
             self.inpaint_bubble_mask(boxes=boxes, commit=False)
+            return
+        elif flags.get('mask') and boxes:
+            # Chains mask -> typeset
+            self.generate_bubble_mask(boxes=boxes, auto_inpaint=False, commit=False)
             return
 
         self._execute_pipeline_post_inpaint()
@@ -90,7 +93,8 @@ class WorkerProcessingMixin:
 
         do_ocr = self.settings.value("auto_scan_ocr", True, type=bool)
         do_trans = self.settings.value("auto_scan_translate", False, type=bool)
-        do_clean = self.settings.value("auto_scan_clean", False, type=bool)
+        do_mask = self.settings.value("auto_scan_mask", False, type=bool)
+        do_inpaint = self.settings.value("auto_scan_inpaint", False, type=bool)
         do_type = self.settings.value("auto_scan_typeset", False, type=bool)
 
         reqs = [("yolo_detector", "ogkalu/manga-text-detector-yolov8s")]
@@ -103,6 +107,14 @@ class WorkerProcessingMixin:
             if engine == "nmt":
                 reqs.append(("nmt_translator", self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")))
             do_trans = True
+            
+        if do_inpaint:
+            do_mask = True
+            
+        if do_mask:
+            reqs.append(("masking_model", "local"))
+        if do_inpaint:
+            reqs.append(("inpaint_model", "local"))
 
         if not self.ensure_models_ready(reqs): return
 
@@ -110,13 +122,14 @@ class WorkerProcessingMixin:
         tasks = ["YOLO"]
         if do_ocr: tasks.append("OCR")
         if do_trans: tasks.append("Translate")
-        if do_clean: tasks.append("Clean")
+        if do_mask: tasks.append("Mask")
+        if do_inpaint: tasks.append("Inpaint")
         if do_type: tasks.append("Typeset")
 
         self._pending_history_msg = f"Auto Pipeline ({', '.join(tasks)})"
 
         self._is_auto_scan_pipeline = True
-        self._pipeline_flags = {'ocr': do_ocr, 'trans': do_trans, 'clean': do_clean, 'typeset': do_type}
+        self._pipeline_flags = {'ocr': do_ocr, 'trans': do_trans, 'mask': do_mask, 'inpaint': do_inpaint, 'typeset': do_type}
         self._active_pipeline_boxes = []
 
         for item in self.scene.items():

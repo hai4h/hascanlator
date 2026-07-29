@@ -87,6 +87,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.load_model("yolo_detector")
         if self.settings.value("auto_load_nmt", False, type=bool):
             self.load_model("nmt_translator")
+        if self.settings.value("auto_load_masking", False, type=bool):
+            self.load_model("masking_model")
+        if self.settings.value("auto_load_inpaint", False, type=bool):
+            self.load_model("inpaint_model")
 
     def _initialize_config_defaults(self):
         """Populates config.ini with all default settings so they are visible and editable by the user."""
@@ -94,10 +98,13 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             "auto_load_mocr": False,
             "auto_load_yolo": False,
             "auto_load_nmt": False,
-            "auto_process": False,  # Auto-Scan in UI
+            "auto_load_masking": False,
+            "auto_load_inpaint": False,
+            "auto_process": False,
             "auto_scan_ocr": True,
             "auto_scan_translate": False,
-            "auto_scan_clean": False,
+            "auto_scan_mask": False,
+            "auto_scan_inpaint": False,
             "auto_scan_typeset": False,
             "use_hf_mirror": False,
             "translation_engine": "google",
@@ -332,16 +339,20 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         chk_trans = QCheckBox("3. Translate")
         chk_trans.setChecked(self.settings.value("auto_scan_translate", False, type=bool))
 
-        chk_clean = QCheckBox("4. Clean Bubble")
-        chk_clean.setChecked(self.settings.value("auto_scan_clean", False, type=bool))
+        chk_mask = QCheckBox("4. Generate Text Mask")
+        chk_mask.setChecked(self.settings.value("auto_scan_mask", False, type=bool))
 
-        chk_typeset = QCheckBox("5. Typeset")
+        chk_inpaint = QCheckBox("5. Inpaint Mask")
+        chk_inpaint.setChecked(self.settings.value("auto_scan_inpaint", False, type=bool))
+
+        chk_typeset = QCheckBox("6. Typeset")
         chk_typeset.setChecked(self.settings.value("auto_scan_typeset", False, type=bool))
 
         config_layout.addWidget(chk_yolo)
         config_layout.addWidget(chk_ocr)
         config_layout.addWidget(chk_trans)
-        config_layout.addWidget(chk_clean)
+        config_layout.addWidget(chk_mask)
+        config_layout.addWidget(chk_inpaint)
         config_layout.addWidget(chk_typeset)
 
         # Enforce Logical Dependencies visually
@@ -349,15 +360,19 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.settings.setValue("auto_scan_translate", v)
             if v and not chk_ocr.isChecked(): chk_ocr.setChecked(True)
 
+        def on_inpaint_toggled(v):
+            self.settings.setValue("auto_scan_inpaint", v)
+            if v and not chk_mask.isChecked(): chk_mask.setChecked(True)
+
         def on_type_toggled(v):
             self.settings.setValue("auto_scan_typeset", v)
             if v and not chk_trans.isChecked(): chk_trans.setChecked(True)
 
         chk_ocr.toggled.connect(lambda v: self.settings.setValue("auto_scan_ocr", v))
         chk_trans.toggled.connect(on_trans_toggled)
-        chk_clean.toggled.connect(lambda v: self.settings.setValue("auto_scan_clean", v))
+        chk_mask.toggled.connect(lambda v: self.settings.setValue("auto_scan_mask", v))
+        chk_inpaint.toggled.connect(on_inpaint_toggled)
         chk_typeset.toggled.connect(on_type_toggled)
-
         act = QWidgetAction(config_menu)
         act.setDefaultWidget(config_widget)
         config_menu.addAction(act)
@@ -593,8 +608,12 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box.text_color = QColor(b_data.get('text_color', "black"))
                 box.stroke_width = b_data.get('stroke_width', 0)
                 box.stroke_color = QColor(b_data.get('stroke_color', "white"))
+                box.generated_mask = b_data.get('generated_mask', None)
 
                 self.scene.addItem(box)
+                
+                if box.generated_mask is not None:
+                    box.set_mask_display(box.generated_mask)
 
                 if b_data.get('is_typeset', False):
                     box.toggle_typeset(force_state=True)
@@ -627,7 +646,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'is_strikeout': getattr(item, 'is_strikeout', False),
             'text_color': getattr(item, 'text_color', QColor("black")).name(),
             'stroke_width': getattr(item, 'stroke_width', 0),
-            'stroke_color': getattr(item, 'stroke_color', QColor("white")).name()
+            'stroke_color': getattr(item, 'stroke_color', QColor("white")).name(),
+            'generated_mask': getattr(item, 'generated_mask').copy() if getattr(item, 'generated_mask', None) is not None else None
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
 
     def save_current_page_state(self):
@@ -725,8 +745,13 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             box.text_color = QColor(b_data.get('text_color', "black"))
             box.stroke_width = b_data.get('stroke_width', 0)
             box.stroke_color = QColor(b_data.get('stroke_color', "white"))
+            box.generated_mask = b_data.get('generated_mask', None)
 
             self.scene.addItem(box)
+            
+            if box.generated_mask is not None:
+                box.set_mask_display(box.generated_mask)
+                
             if b_data.get('is_typeset', False):
                 box.toggle_typeset(force_state=True)
 

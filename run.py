@@ -8,6 +8,12 @@ from PySide6.QtWidgets import QApplication
 from src.ui.main.window import HAScanlatorWindow
 
 def main():
+    try:
+        import jurigged
+        jurigged.watch()
+    except ImportError:
+        pass
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     window = HAScanlatorWindow()
