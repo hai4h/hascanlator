@@ -262,7 +262,7 @@ class ImageOperationsMixin:
                 box.indent = max(0, box.indent + delta)
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Change Indent")
+        if changed: self.commit_history("Change Indent", aggregate=True)
 
     def set_text_valignment(self, valign):
         changed = False
@@ -280,7 +280,7 @@ class ImageOperationsMixin:
                 box.line_spacing = max(0.5, round(box.line_spacing + delta, 1))
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Change Line Spacing")
+        if changed: self.commit_history("Change Line Spacing", aggregate=True)
 
     def reset_text_alignment(self):
         changed = False
@@ -309,7 +309,7 @@ class ImageOperationsMixin:
                 box.stroke_width = max(0, width)
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Change Stroke Width")
+        if changed: self.commit_history("Change Stroke Width", aggregate=True)
 
     def set_text_stroke_color(self, color_name):
         changed = False
@@ -357,7 +357,7 @@ class ImageOperationsMixin:
                 box.font_size = max(1, size)
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Change Font Size")
+        if changed: self.commit_history("Change Font Size", aggregate=True)
 
     def toggle_text_bold(self):
         changed = False

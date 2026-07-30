@@ -655,7 +655,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         boxes = self.get_current_boxes_state()
         self.workspace.save_page_state(self.workspace.current_image_path, boxes)
 
-    def commit_history(self, desc):
+    def commit_history(self, desc, aggregate=False):
         path = self.workspace.current_image_path
         if not path: return
 
@@ -670,6 +670,15 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         curr_idx = self.workspace.history_indices[path]
         if curr_idx < len(self.workspace.history[path]) - 1:
             self.workspace.history[path] = self.workspace.history[path][:curr_idx + 1]
+
+        # Aggregate continuous changes of the same type into a single history step
+        if aggregate and curr_idx >= 0:
+            if self.workspace.history[path][curr_idx]['desc'] == desc:
+                self.workspace.history[path][curr_idx]['boxes'] = boxes
+                self.workspace.history[path][curr_idx]['image'] = img
+                self._refresh_history_ui()
+                self.update_button_states()
+                return
 
         self.workspace.history[path].append({
             'desc': desc,

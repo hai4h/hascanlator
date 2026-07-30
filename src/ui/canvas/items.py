@@ -27,9 +27,13 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.translated_text = ""
 
         # --- Typesetting Variables ---
+        from PySide6.QtWidgets import QGraphicsPixmapItem
+        self.stroke_item = QGraphicsPixmapItem(self)
+        self.stroke_item.hide()
+        self.stroke_item.setZValue(-2) # Render strictly behind the text fill
+
         self.text_item = QGraphicsTextItem(self)
         self.text_item.hide()
-
         self.text_item.setAcceptedMouseButtons(Qt.NoButton)
         self.text_item.setTextInteractionFlags(Qt.NoTextInteraction)
         self.text_item.setAcceptHoverEvents(False)
@@ -69,30 +73,30 @@ class BoundingBoxItem(QGraphicsRectItem):
         import numpy as np
         from PySide6.QtGui import QImage, QPixmap
         from PySide6.QtWidgets import QGraphicsPixmapItem
-        
+
         h, w = mask_array.shape[:2]
-        
+
         # Ensure mask is 8-bit single channel
         if mask_array.dtype != np.uint8:
             mask_array = mask_array.astype(np.uint8)
-            
+
         rgba = np.zeros((h, w, 4), dtype=np.uint8)
-        
+
         # Draw red contours mapping the detected bounding edge
         contours, _ = cv2.findContours(mask_array, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(rgba, contours, -1, (255, 0, 0, 255), 2)
-        
+
         # Apply semi-transparent red inside the bounds
         rgba[mask_array > 127] = (255, 0, 0, 100)
-        
+
         bytes_per_line = 4 * w
         qimg = QImage(rgba.data, w, h, bytes_per_line, QImage.Format_RGBA8888)
         pixmap = QPixmap.fromImage(qimg)
-        
+
         if not hasattr(self, 'mask_item'):
             self.mask_item = QGraphicsPixmapItem(self)
             self.mask_item.setZValue(-0.5) # Float between bounding box and background
-        
+
         self.mask_item.setPixmap(pixmap)
         self.mask_item.setPos(self.rect().topLeft())
         self.mask_item.show()
@@ -107,13 +111,10 @@ class BoundingBoxItem(QGraphicsRectItem):
     def update_typeset(self):
         r = self.rect()
 
-        # 1. Remove Qt's default internal document margin (4px) which ruins perfect centering
         self.text_item.document().setDocumentMargin(0)
 
-        # Determine strict drawing width based on indent
         usable_width = max(10.0, r.width() - (self.indent * 2))
 
-        # --- PASS 1: Natural Wrapping at Strict Width ---
         self.text_item.setTextWidth(usable_width)
         self.text_item.setPlainText(self.translated_text)
 
@@ -136,23 +137,17 @@ class BoundingBoxItem(QGraphicsRectItem):
         def apply_formats():
             cursor = QTextCursor(self.text_item.document())
             cursor.select(QTextCursor.Document)
-
             block_format = QTextBlockFormat()
             block_format.setAlignment(self.align)
             block_format.setLineHeight(self.line_spacing * 100.0, QTextBlockFormat.ProportionalHeight.value)
             cursor.mergeBlockFormat(block_format)
 
             char_format = QTextCharFormat()
-            if self.stroke_width > 0:
-                pen = QPen(self.stroke_color, self.stroke_width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-                char_format.setTextOutline(pen)
-            else:
-                char_format.setTextOutline(QPen(Qt.NoPen))
+            char_format.setTextOutline(QPen(Qt.NoPen)) # Pure text, no buggy Qt strokes!
             cursor.mergeCharFormat(char_format)
 
         apply_formats()
 
-        # --- PASS 2: Hard-Wrap on Overflow Detection ---
         text_rect = self.text_item.boundingRect()
         actual_text_w = text_rect.width()
 
@@ -172,20 +167,17 @@ class BoundingBoxItem(QGraphicsRectItem):
                         length = line.textLength()
                         wrapped_lines.append(block.text()[start:start+length].strip())
 
-            # Re-apply text with hard breaks
-            self.text_item.setPlainText("\n".join(wrapped_lines))
+            hard_text = "\n".join(wrapped_lines)
+            self.text_item.setPlainText(hard_text)
 
-            # Expand the document width to the overflowing word so ALL lines share the exact same center axis
+            actual_text_w = self.text_item.document().idealWidth()
             self.text_item.setTextWidth(actual_text_w)
 
-            # Re-apply styling lost during setPlainText
             self.text_item.setFont(font)
             apply_formats()
-
             text_rect = self.text_item.boundingRect()
             actual_text_w = text_rect.width()
 
-        # --- FINAL POSITIONING ---
         text_h = text_rect.height()
         box_w = r.width()
         box_h = r.height()
@@ -199,6 +191,60 @@ class BoundingBoxItem(QGraphicsRectItem):
         else: y_pos = r.top() + (box_h - text_h) / 2.0
 
         self.text_item.setPos(x_pos, y_pos)
+
+        # GENERATE PERFECT PHOTOSHOP-STYLE STROKE USING OPENCV
+        if self.stroke_width > 0 and self.is_typeset and self.translated_text.strip():
+            import cv2
+            import numpy as np
+            from PySide6.QtGui import QImage, QPainter, QPixmap
+
+            pad = self.stroke_width + 4
+            tw, th = int(actual_text_w) + 2, int(text_h) + 2
+
+            # 1. Render Qt text layout to a transparent QImage
+            qimg = QImage(tw + pad*2, th + pad*2, QImage.Format_RGBA8888)
+            qimg.fill(Qt.transparent)
+
+            painter = QPainter(qimg)
+            painter.setRenderHint(QPainter.TextAntialiasing, True)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.translate(pad, pad)
+            self.text_item.document().drawContents(painter)
+            painter.end()
+
+            # 2. Convert QImage to Numpy safely
+            # PySide6 returns a memoryview natively, so we can feed it directly to numpy
+            arr = np.frombuffer(qimg.bits(), dtype=np.uint8).reshape((th + pad*2, tw + pad*2, 4)).copy()
+
+            alpha = arr[:, :, 3]
+
+            # 3. Dilate the alpha channel mathematically (Zero holes, perfect rounding)
+            k_size = self.stroke_width * 2 + 1
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+            dilated_alpha = cv2.dilate(alpha, kernel)
+
+            # 4. Anti-alias the hard dilated edges slightly
+            dilated_alpha = cv2.GaussianBlur(dilated_alpha, (3, 3), 0)
+
+            # 5. Paint the dilated silhouette with the exact stroke color
+            stroke_rgba = np.zeros((th + pad*2, tw + pad*2, 4), dtype=np.uint8)
+            r_c, g_c, b_c, _ = self.stroke_color.getRgb()
+            stroke_rgba[:, :, 0] = r_c
+            stroke_rgba[:, :, 1] = g_c
+            stroke_rgba[:, :, 2] = b_c
+            stroke_rgba[:, :, 3] = dilated_alpha
+
+            # 6. Apply to the background layer as a pure image
+            out_qimg = QImage(stroke_rgba.data, tw + pad*2, th + pad*2, (tw + pad*2)*4, QImage.Format_RGBA8888)
+            self.stroke_item.setPixmap(QPixmap.fromImage(out_qimg.copy()))
+
+            # 7. Slide it perfectly behind the text, offset by the padding
+            self.stroke_item.setPos(x_pos - pad, y_pos - pad)
+            self.stroke_item.setVisible(True)
+        else:
+            self.stroke_item.setVisible(False)
+            from PySide6.QtGui import QPixmap
+            self.stroke_item.setPixmap(QPixmap())
 
     def toggle_typeset(self, force_state=None):
         self.is_typeset = force_state if force_state is not None else not self.is_typeset
