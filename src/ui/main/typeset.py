@@ -234,12 +234,12 @@ class TypesetToolBar(QWidget):
         align_layout.setContentsMargins(6, 6, 6, 6)
         align_layout.setSpacing(6)
 
-        self.btn_align_left = create_menu_btn("|<", "Align Left", True, self.align_menu)
-        self.btn_align_center = create_menu_btn("≡", "Align Center", True, self.align_menu)
-        self.btn_align_right = create_menu_btn(">|", "Align Right", True, self.align_menu)
-        self.btn_valign_top = create_menu_btn("⇡", "Align Top", True, self.align_menu)
-        self.btn_valign_middle = create_menu_btn("⇕", "Align Middle", True, self.align_menu)
-        self.btn_valign_bottom = create_menu_btn("⇣", "Align Bottom", True, self.align_menu)
+        self.btn_align_left = create_menu_btn("|<", "Align Left", False, self.align_menu)
+        self.btn_align_center = create_menu_btn("≡", "Align Center", False, self.align_menu)
+        self.btn_align_right = create_menu_btn(">|", "Align Right", False, self.align_menu)
+        self.btn_valign_top = create_menu_btn("⇡", "Align Top", False, self.align_menu)
+        self.btn_valign_middle = create_menu_btn("⇕", "Align Middle", False, self.align_menu)
+        self.btn_valign_bottom = create_menu_btn("⇣", "Align Bottom", False, self.align_menu)
 
         self.btn_align_reset = create_reset_btn("Reset Alignment")
 

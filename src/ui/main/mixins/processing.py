@@ -107,10 +107,10 @@ class WorkerProcessingMixin:
             if engine == "nmt":
                 reqs.append(("nmt_translator", self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")))
             do_trans = True
-            
+
         if do_inpaint:
             do_mask = True
-            
+
         if do_mask:
             reqs.append(("masking_model", "local_masking"))
         if do_inpaint:
@@ -199,7 +199,7 @@ class WorkerProcessingMixin:
 
         self._pending_history_msg = f"Run OCR ({len(selected_boxes)} Selected)"
         self._is_auto_scan_pipeline = True
-        self._pipeline_flags = {'trans': False, 'clean': False, 'typeset': False}
+        self._pipeline_flags = {'trans': False, 'mask': False, 'inpaint': False, 'typeset': False}
         self._active_pipeline_boxes = selected_boxes
         self.set_processing_lock(True)
         self.update_window_title("Reading text...")
@@ -277,9 +277,6 @@ class WorkerProcessingMixin:
             return
 
         engine = self.settings.value("translation_engine", "google")
-        if engine == "nmt":
-            repo_id = self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
-            if not self.ensure_model_ready("nmt_translator", repo_id): return
 
         boxes_data = [(box.raw_text, box) for box in selected_boxes if box.raw_text.strip()]
         if not boxes_data:
@@ -296,7 +293,7 @@ class WorkerProcessingMixin:
 
         self._pending_history_msg = f"Translate ({len(boxes_data)} Selected)"
         self._is_auto_scan_pipeline = True
-        self._pipeline_flags = {'clean': False, 'typeset': False, 'trans': True}
+        self._pipeline_flags = {'mask': False, 'inpaint': False, 'typeset': False, 'trans': True}
         self._active_pipeline_boxes = selected_boxes
         self._start_translation_worker(engine, boxes_data)
 
@@ -306,15 +303,14 @@ class WorkerProcessingMixin:
             return
 
         reqs = self._get_translation_requirements(selected_boxes)
+        reqs.append(("masking_model", "local_masking"))
+        reqs.append(("inpaint_model", "local_inpaint"))
         if reqs and not self.ensure_models_ready(reqs): return
 
         if self._check_and_run_ocr_first(selected_boxes, self.run_translate_typeset_selected):
             return
 
         engine = self.settings.value("translation_engine", "google")
-        if engine == "nmt":
-            repo_id = self.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en")
-            if not self.ensure_model_ready("nmt_translator", repo_id): return
 
         boxes_data = [(box.raw_text, box) for box in selected_boxes if box.raw_text.strip()]
         if not boxes_data:
@@ -330,7 +326,7 @@ class WorkerProcessingMixin:
 
         self._pending_history_msg = f"Translate & Typeset ({len(boxes_data)} Selected)"
         self._is_auto_scan_pipeline = True
-        self._pipeline_flags = {'clean': True, 'typeset': True, 'trans': True}
+        self._pipeline_flags = {'mask': True, 'inpaint': True, 'typeset': True, 'trans': True}
         self._active_pipeline_boxes = selected_boxes
         self._start_translation_worker(engine, boxes_data)
 
@@ -344,6 +340,8 @@ class WorkerProcessingMixin:
             return
 
         reqs = self._get_translation_requirements(all_boxes)
+        reqs.append(("masking_model", "local_masking"))
+        reqs.append(("inpaint_model", "local_inpaint"))
         if reqs and not self.ensure_models_ready(reqs): return
 
         if self._check_and_run_ocr_first(all_boxes, self.run_translate_typeset_all):
@@ -366,7 +364,7 @@ class WorkerProcessingMixin:
 
         self._pending_history_msg = f"Translate & Typeset All ({len(boxes_data)} Boxes)"
         self._is_auto_scan_pipeline = True
-        self._pipeline_flags = {'clean': True, 'typeset': True, 'trans': True}
+        self._pipeline_flags = {'mask': True, 'inpaint': True, 'typeset': True, 'trans': True}
         self._active_pipeline_boxes = [box for _, box in boxes_data]
         self._start_translation_worker(engine, boxes_data)
 

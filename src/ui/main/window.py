@@ -268,6 +268,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         # Connect the canvas resize event so the overlay sticks tightly to the edges
         self.view.resized.connect(self.update_toolbar_geometry)
+        
+        # Also connect scrollbar visibility changes so it doesn't overlap them when zooming
+        self.view.verticalScrollBar().rangeChanged.connect(lambda min, max: self.update_toolbar_geometry())
+        self.view.horizontalScrollBar().rangeChanged.connect(lambda min, max: self.update_toolbar_geometry())
 
         center_layout.addWidget(self.view, stretch=1)
         center_layout.addWidget(self.nav)
@@ -477,17 +481,24 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         vw = self.view.width()
         vh = self.view.height()
 
+        # Safely account for scrollbars so the toolbar doesn't hide underneath them
+        v_scroll = self.view.verticalScrollBar()
+        v_width = v_scroll.width() if v_scroll.isVisible() else 0
+        
+        h_scroll = self.view.horizontalScrollBar()
+        h_height = h_scroll.height() if h_scroll.isVisible() else 0
+
         # Calculate absolute pixel coordinates based on dynamic content size rather than a fixed 50px
         tb_size = self.typeset_toolbar.sizeHint()
 
         if pos == "left":
-            self.typeset_toolbar.setGeometry(0, 0, tb_size.width(), vh)
+            self.typeset_toolbar.setGeometry(0, 0, tb_size.width(), vh - h_height)
         elif pos == "right":
-            self.typeset_toolbar.setGeometry(vw - tb_size.width(), 0, tb_size.width(), vh)
+            self.typeset_toolbar.setGeometry(vw - tb_size.width() - v_width, 0, tb_size.width(), vh - h_height)
         elif pos == "top":
-            self.typeset_toolbar.setGeometry(0, 0, vw, tb_size.height())
+            self.typeset_toolbar.setGeometry(0, 0, vw - v_width, tb_size.height())
         elif pos == "bottom":
-            self.typeset_toolbar.setGeometry(0, vh - tb_size.height(), vw, tb_size.height())
+            self.typeset_toolbar.setGeometry(0, vh - tb_size.height() - h_height, vw - v_width, tb_size.height())
 
     def update_button_states(self):
         has_image = self.workspace.has_images

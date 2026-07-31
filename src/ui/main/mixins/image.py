@@ -253,7 +253,7 @@ class ImageOperationsMixin:
                 box.align = align
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Set Text Alignment")
+        if changed: self.commit_history("Set Text Alignment", aggregate=True)
 
     def set_text_indent(self, delta):
         changed = False
@@ -271,7 +271,7 @@ class ImageOperationsMixin:
                 box.valign = valign
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Set Vertical Alignment")
+        if changed: self.commit_history("Set Vertical Alignment", aggregate=True)
 
     def set_text_line_spacing(self, delta):
         changed = False
@@ -319,7 +319,7 @@ class ImageOperationsMixin:
                 box.stroke_color = QColor(color_name.lower())
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Change Stroke Color")
+        if changed: self.commit_history("Change Stroke Color", aggregate=True)
 
     def set_text_color(self, color_name):
         changed = False
@@ -329,7 +329,7 @@ class ImageOperationsMixin:
                 box.text_color = QColor(color_name.lower())
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Change Text Color")
+        if changed: self.commit_history("Change Text Color", aggregate=True)
 
     def set_text_font_family(self, family):
         changed = False
@@ -348,7 +348,7 @@ class ImageOperationsMixin:
                 self.recent_fonts = self.recent_fonts[:5]
 
         self.refresh_font_combo(current_font=family)
-        if changed: self.commit_history("Change Font Family")
+        if changed: self.commit_history("Change Font Family", aggregate=True)
 
     def set_text_font_size_exact(self, size):
         changed = False
@@ -366,7 +366,7 @@ class ImageOperationsMixin:
                 box.is_bold = not box.is_bold
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Toggle Bold")
+        if changed: self.commit_history("Toggle Bold", aggregate=True)
 
     def toggle_text_italic(self):
         changed = False
@@ -375,7 +375,7 @@ class ImageOperationsMixin:
                 box.is_italic = not box.is_italic
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Toggle Italic")
+        if changed: self.commit_history("Toggle Italic", aggregate=True)
 
     def toggle_text_underline(self):
         changed = False
@@ -384,7 +384,7 @@ class ImageOperationsMixin:
                 box.is_underline = not box.is_underline
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Toggle Underline")
+        if changed: self.commit_history("Toggle Underline", aggregate=True)
 
     def toggle_text_strikeout(self):
         changed = False
@@ -393,7 +393,7 @@ class ImageOperationsMixin:
                 box.is_strikeout = not box.is_strikeout
                 if box.is_typeset: box.update_typeset()
                 changed = True
-        if changed: self.commit_history("Toggle Strikeout")
+        if changed: self.commit_history("Toggle Strikeout", aggregate=True)
 
     def apply_default_font_settings(self, box):
         """Applies global font settings from QSettings to a specific box."""
