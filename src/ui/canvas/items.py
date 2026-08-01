@@ -40,6 +40,8 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.text_item.setZValue(-1)
 
         self.is_typeset = False
+        self.is_bubble = True
+        self.bg_is_noisy = False
         self.align = Qt.AlignCenter
         self.valign = Qt.AlignVCenter
         self.indent = 5

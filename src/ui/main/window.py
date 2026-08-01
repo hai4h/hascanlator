@@ -268,7 +268,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         # Connect the canvas resize event so the overlay sticks tightly to the edges
         self.view.resized.connect(self.update_toolbar_geometry)
-        
+
         # Also connect scrollbar visibility changes so it doesn't overlap them when zooming
         self.view.verticalScrollBar().rangeChanged.connect(lambda min, max: self.update_toolbar_geometry())
         self.view.horizontalScrollBar().rangeChanged.connect(lambda min, max: self.update_toolbar_geometry())
@@ -440,7 +440,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         # --- STROKE & COLOR SIGNALS ---
         self.typeset_toolbar.combo_text_color.currentTextChanged.connect(self.set_text_color)
-        
+
         self.typeset_toolbar.spin_stroke_width.valueChanged.connect(self.set_text_stroke_width)
         self.typeset_toolbar.btn_stroke_plus.clicked.connect(
             lambda: self.typeset_toolbar.spin_stroke_width.setValue(self.typeset_toolbar.spin_stroke_width.value() + 1)
@@ -484,7 +484,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         # Safely account for scrollbars so the toolbar doesn't hide underneath them
         v_scroll = self.view.verticalScrollBar()
         v_width = v_scroll.width() if v_scroll.isVisible() else 0
-        
+
         h_scroll = self.view.horizontalScrollBar()
         h_height = h_scroll.height() if h_scroll.isVisible() else 0
 
@@ -604,6 +604,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box = BoundingBoxItem(b_data['rect'], is_auto=b_data['is_auto'])
                 box.setPos(b_data['pos'])
                 box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
+                box.is_bubble = b_data.get('is_bubble', True)
+                box.bg_is_noisy = b_data.get('bg_is_noisy', False)
 
                 box.align = b_data.get('align', Qt.AlignCenter)
                 box.valign = b_data.get('valign', Qt.AlignVCenter)
@@ -622,7 +624,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box.generated_mask = b_data.get('generated_mask', None)
 
                 self.scene.addItem(box)
-                
+
                 if box.generated_mask is not None:
                     box.set_mask_display(box.generated_mask)
 
@@ -645,6 +647,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'rect': item.rect(), 'pos': item.scenePos(), 'is_auto': getattr(item, 'is_auto', False),
             'raw_text': getattr(item, 'raw_text', ''), 'translated_text': getattr(item, 'translated_text', ''),
             'is_typeset': getattr(item, 'is_typeset', False),
+            'is_bubble': getattr(item, 'is_bubble', True),
+            'bg_is_noisy': getattr(item, 'bg_is_noisy', False),
             'align': getattr(item, 'align', Qt.AlignCenter),
             'valign': getattr(item, 'valign', Qt.AlignVCenter),
             'indent': getattr(item, 'indent', 5),
@@ -752,6 +756,8 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             box = BoundingBoxItem(b_data['rect'], is_auto=b_data['is_auto'])
             box.setPos(b_data['pos'])
             box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
+            box.is_bubble = b_data.get('is_bubble', True)
+            box.bg_is_noisy = b_data.get('bg_is_noisy', False)
             box.align = b_data.get('align', Qt.AlignCenter)
             box.valign = b_data.get('valign', Qt.AlignVCenter)
             box.indent = b_data.get('indent', 5)
@@ -768,10 +774,10 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             box.generated_mask = b_data.get('generated_mask', None)
 
             self.scene.addItem(box)
-            
+
             if box.generated_mask is not None:
                 box.set_mask_display(box.generated_mask)
-                
+
             if b_data.get('is_typeset', False):
                 box.toggle_typeset(force_state=True)
 
@@ -834,7 +840,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             self.typeset_toolbar.spin_stroke_width.blockSignals(True)
             self.typeset_toolbar.spin_stroke_width.setValue(self.current_selected_box.stroke_width)
             self.typeset_toolbar.spin_stroke_width.blockSignals(False)
-            
+
             self.typeset_toolbar.combo_stroke_color.blockSignals(True)
             color_name = self.current_selected_box.stroke_color.name()
             # Match the color dynamically, preventing case-sensitivity issues

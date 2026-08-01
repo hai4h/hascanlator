@@ -105,13 +105,74 @@ class ImageOperationsMixin:
             w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
             if w <= 0 or h <= 0: continue
 
-            mask_roi = full_mask[y:y+h, x:x+w].copy()
+            raw_mask_roi = full_mask[y:y+h, x:x+w].copy()
 
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            mask_roi = cv2.dilate(mask_roi, kernel, iterations=3)
+            mask_roi = cv2.dilate(raw_mask_roi, kernel, iterations=3)
 
             box.generated_mask = mask_roi
             box.set_mask_display(mask_roi)
+
+            # --- CLASSIFY BUBBLE VS FLOATING TEXT ---
+            orig_img = self.workspace.original_images[path]
+            roi_img = orig_img[y:y+h, x:x+w]
+
+            if roi_img.size > 0:
+                gray_roi = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY)
+
+                # Expand the text mask by 4 pixels to guarantee we completely cover the Japanese text and its anti-aliasing
+                kernel_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+                text_mask = cv2.dilate(raw_mask_roi, kernel_bg)
+                bg_mask = cv2.bitwise_not(text_mask)
+
+                bg_pixels = gray_roi[bg_mask > 127]
+
+                is_bubble = True
+                bg_is_noisy = False
+
+                if len(bg_pixels) > 0:
+                    bg_mean = np.mean(bg_pixels)
+                    bg_std = np.std(bg_pixels)
+
+                    # 1. Edge Detection (Detects drawing lines, panel borders, picture frames)
+                    edges = cv2.Canny(gray_roi, 50, 150)
+                    bg_edges = edges[bg_mask > 127]
+
+                    # If even 1% of the background consists of strong edges/lines, it is drawn art.
+                    edge_ratio = np.sum(bg_edges > 0) / len(bg_pixels)
+
+                    # 2. Strict Uniformity Checks
+                    white_ratio = np.sum(bg_pixels > 230) / len(bg_pixels)
+                    black_ratio = np.sum(bg_pixels < 25) / len(bg_pixels)
+
+                    text_lightness = box.text_color.lightness()
+                    contrast = abs(bg_mean - text_lightness)
+
+                    # --- BACKGROUND TYPE CLASSIFICATION ---
+                    # Noisy if it has art lines, high variance (screentones), or low contrast
+                    if edge_ratio > 0.01 or bg_std > 20 or contrast < 80:
+                        bg_is_noisy = True
+                    else:
+                        bg_is_noisy = False
+
+                    # --- SPEECH BUBBLE CLASSIFICATION ---
+                    # Very pure white or black region (This will be used for auto-expand logic later)
+                    if white_ratio > 0.85 or black_ratio > 0.85:
+                        is_bubble = True
+                    else:
+                        is_bubble = False
+
+                box.is_bubble = is_bubble
+                box.bg_is_noisy = bg_is_noisy
+
+                # Auto-apply a contrasting stroke if the background is noisy art
+                if bg_is_noisy and box.stroke_width == 0:
+                    box.stroke_width = 4
+                    from PySide6.QtGui import QColor
+                    if box.text_color.lightness() < 128:
+                        box.stroke_color = QColor("white")
+                    else:
+                        box.stroke_color = QColor("black")
 
         auto_inpaint = getattr(self, '_pending_auto_inpaint', False)
         commit = getattr(self, '_pending_mask_commit', True)
