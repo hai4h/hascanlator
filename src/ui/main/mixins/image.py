@@ -316,6 +316,37 @@ class ImageOperationsMixin:
         self._cleanup_inpaint_state()
 
     #  TYPESETTING CONTROLS
+    def auto_fit_selected_fonts(self):
+        changed = False
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.auto_fit_font_size()
+                changed = True
+        if changed: self.commit_history("Auto-Fit Font Size", aggregate=True)
+
+    def set_auto_fit_ratio(self):
+        from PySide6.QtWidgets import QInputDialog
+        boxes = [b for b in self.scene.selectedItems() if isinstance(b, BoundingBoxItem)]
+        if not boxes: return
+        current = int(boxes[0].auto_fit_target_ratio * 100)
+        val, ok = QInputDialog.getInt(self, "Auto-Fit Fill Ratio", "Percentage of height to fill (10-100):", current, 10, 100)
+        if ok:
+            changed = False
+            for box in boxes:
+                box.auto_fit_target_ratio = val / 100.0
+                if box.is_typeset:
+                    box.auto_fit_font_size()
+                changed = True
+            if changed: self.commit_history("Change Auto-Fit Ratio", aggregate=True)
+
+    def set_selected_polygon_shape(self, n):
+        changed = False
+        for box in self.scene.selectedItems():
+            if isinstance(box, BoundingBoxItem):
+                box.set_vertex_count(n)
+                changed = True
+        if changed: self.commit_history(f"Set Shape ({n} points)", aggregate=True)
+
     def toggle_typeset_view(self):
         changed = False
         for box in self.scene.selectedItems():

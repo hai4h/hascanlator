@@ -1,5 +1,6 @@
 import sys
 import os
+os.environ["QT_LOGGING_RULES"] = "qt.qpa.wayland.textinput.warning=false"
 
 # Suppress extra YOLO terminal output
 os.environ["YOLO_VERBOSE"] = "False"
@@ -10,7 +11,7 @@ from src.ui.main.window import HAScanlatorWindow
 def main():
     try:
         import jurigged
-        jurigged.watch()
+        jurigged.watch(pattern="./src")
     except ImportError:
         pass
 

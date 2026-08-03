@@ -85,6 +85,29 @@ class TypesetToolBar(QWidget):
         self.btn_toggle_typeset = create_btn("⊙", "Toggle Typeset Visibility")
 
         # ==========================================
+        # SHAPE MENU
+        # ==========================================
+        self.btn_shape = create_btn("⬟", "Box Shape & Auto-Fit")
+        self.shape_menu = QMenu(self)
+        self.shape_menu.setStyleSheet("""
+            QMenu { background-color: #333333; color: white; border: 1px solid #555555; }
+            QMenu::item { padding: 5px 20px 5px 20px; }
+            QMenu::item:selected { background-color: #555555; }
+        """)
+        
+        self.act_auto_fit = self.shape_menu.addAction("Auto-Fit Font Size")
+        self.act_set_fit_ratio = self.shape_menu.addAction("Set Auto-Fit Fill Ratio...")
+        self.shape_menu.addSeparator()
+        
+        polygon_menu = self.shape_menu.addMenu("Set Polygon Shape")
+        self.act_shape_sq = polygon_menu.addAction("Square (4 points)")
+        self.act_shape_hex = polygon_menu.addAction("Hexagon (6 points)")
+        self.act_shape_oct = polygon_menu.addAction("Octagon (8 points)")
+        self.act_shape_cir = polygon_menu.addAction("Circle-ish (16 points)")
+        
+        self.btn_shape.setMenu(self.shape_menu)
+
+        # ==========================================
         # FONT MENU
         # ==========================================
         self.btn_font = create_btn("A", "Font Controls")

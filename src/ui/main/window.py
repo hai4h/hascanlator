@@ -403,6 +403,13 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         self.typeset_toolbar.btn_inpaint_bubble.clicked.connect(self.inpaint_bubble_mask)
         self.typeset_toolbar.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
 
+        self.typeset_toolbar.act_auto_fit.triggered.connect(self.auto_fit_selected_fonts)
+        self.typeset_toolbar.act_set_fit_ratio.triggered.connect(self.set_auto_fit_ratio)
+        self.typeset_toolbar.act_shape_sq.triggered.connect(lambda: self.set_selected_polygon_shape(4))
+        self.typeset_toolbar.act_shape_hex.triggered.connect(lambda: self.set_selected_polygon_shape(6))
+        self.typeset_toolbar.act_shape_oct.triggered.connect(lambda: self.set_selected_polygon_shape(8))
+        self.typeset_toolbar.act_shape_cir.triggered.connect(lambda: self.set_selected_polygon_shape(16))
+
         # --- TEXT ALIGN SIGNALS ---
         self.typeset_toolbar.btn_align_left.clicked.connect(lambda: self.set_text_alignment(Qt.AlignLeft))
         self.typeset_toolbar.btn_align_center.clicked.connect(lambda: self.set_text_alignment(Qt.AlignCenter))
@@ -602,7 +609,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
         cached_data = self.workspace.get_page_state(path)
         if cached_data:
             for b_data in cached_data:
-                box = BoundingBoxItem(b_data['rect'], is_auto=b_data['is_auto'])
+                poly = b_data.get('polygon', b_data.get('rect'))
+                shape_type = b_data.get('shape_type', 'rect')
+                box = BoundingBoxItem(poly, is_auto=b_data['is_auto'], shape_type=shape_type)
                 box.setPos(b_data['pos'])
                 box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
                 box.is_bubble = b_data.get('is_bubble', True)
@@ -623,6 +632,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
                 box.stroke_width = b_data.get('stroke_width', 0)
                 box.stroke_color = QColor(b_data.get('stroke_color', "white"))
                 box.generated_mask = b_data.get('generated_mask', None)
+                box.auto_fit_target_ratio = b_data.get('auto_fit_target_ratio', 0.8)
 
                 self.scene.addItem(box)
 
@@ -645,7 +655,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
     def get_current_boxes_state(self):
         return [{
-            'rect': item.rect(), 'pos': item.scenePos(), 'is_auto': getattr(item, 'is_auto', False),
+            'polygon': item.polygon(), 'pos': item.scenePos(), 'is_auto': getattr(item, 'is_auto', False),
             'raw_text': getattr(item, 'raw_text', ''), 'translated_text': getattr(item, 'translated_text', ''),
             'is_typeset': getattr(item, 'is_typeset', False),
             'is_bubble': getattr(item, 'is_bubble', True),
@@ -663,7 +673,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             'text_color': getattr(item, 'text_color', QColor("black")).name(),
             'stroke_width': getattr(item, 'stroke_width', 0),
             'stroke_color': getattr(item, 'stroke_color', QColor("white")).name(),
-            'generated_mask': getattr(item, 'generated_mask').copy() if getattr(item, 'generated_mask', None) is not None else None
+            'generated_mask': getattr(item, 'generated_mask').copy() if getattr(item, 'generated_mask', None) is not None else None,
+            'auto_fit_target_ratio': getattr(item, 'auto_fit_target_ratio', 0.8),
+            'shape_type': getattr(item, 'shape_type', 'rect')
         } for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
 
     def save_current_page_state(self):
@@ -754,7 +766,9 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
 
         # Redraw Boxes
         for b_data in step['boxes']:
-            box = BoundingBoxItem(b_data['rect'], is_auto=b_data['is_auto'])
+            poly = b_data.get('polygon', b_data.get('rect'))
+            shape_type = b_data.get('shape_type', 'rect')
+            box = BoundingBoxItem(poly, is_auto=b_data['is_auto'], shape_type=shape_type)
             box.setPos(b_data['pos'])
             box.raw_text, box.translated_text = b_data['raw_text'], b_data['translated_text']
             box.is_bubble = b_data.get('is_bubble', True)
@@ -773,6 +787,7 @@ class HAScanlatorWindow(QMainWindow, ImageOperationsMixin, ModelManagementMixin,
             box.stroke_width = b_data.get('stroke_width', 0)
             box.stroke_color = QColor(b_data.get('stroke_color', "white"))
             box.generated_mask = b_data.get('generated_mask', None)
+            box.auto_fit_target_ratio = b_data.get('auto_fit_target_ratio', 0.8)
 
             self.scene.addItem(box)
 

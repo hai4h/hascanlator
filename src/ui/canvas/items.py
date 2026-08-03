@@ -1,13 +1,27 @@
-from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsTextItem
-from PySide6.QtGui import QPen, QColor, QFont, QPainterPath, QTextOption
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGraphicsPolygonItem, QMenu, QGraphicsPixmapItem
+from PySide6.QtGui import QPen, QColor, QFont, QPainterPath, QTextOption, QPolygonF, QTextLayout, QFontMetrics, QPainter, QImage, QPixmap
+from PySide6.QtCore import Qt, QPointF, QRectF
+import cv2
+import numpy as np
 
-class BoundingBoxItem(QGraphicsRectItem):
-    NONE, LEFT, TOP, RIGHT, BOTTOM, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT = range(9)
+class BoundingBoxItem(QGraphicsPolygonItem):
+    NONE, LEFT, TOP, RIGHT, BOTTOM, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT = range(-9, 0)
 
-    def __init__(self, rect, is_auto=False, parent=None):
-        super().__init__(rect, parent)
-        self.setFlags(QGraphicsRectItem.ItemIsSelectable | QGraphicsRectItem.ItemIsMovable | QGraphicsRectItem.ItemSendsGeometryChanges)
+    def __init__(self, rect_or_poly, is_auto=False, shape_type=None, parent=None):
+        if isinstance(rect_or_poly, QRectF):
+            self._rect = rect_or_poly
+            poly = QPolygonF(rect_or_poly)
+            self.shape_type = "rect" if shape_type is None else shape_type
+        else:
+            poly = rect_or_poly
+            self._rect = poly.boundingRect()
+            if shape_type is None:
+                self.shape_type = "rect" if poly.count() == 4 else "polygon"
+            else:
+                self.shape_type = shape_type
+
+        super().__init__(poly, parent)
+        self.setFlags(QGraphicsPolygonItem.ItemIsSelectable | QGraphicsPolygonItem.ItemIsMovable | QGraphicsPolygonItem.ItemSendsGeometryChanges)
         self.setAcceptHoverEvents(True)
         self.is_auto = is_auto
 
@@ -27,18 +41,8 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.translated_text = ""
 
         # --- Typesetting Variables ---
-        from PySide6.QtWidgets import QGraphicsPixmapItem
-        self.stroke_item = QGraphicsPixmapItem(self)
-        self.stroke_item.hide()
-        self.stroke_item.setZValue(-2) # Render strictly behind the text fill
-
-        self.text_item = QGraphicsTextItem(self)
-        self.text_item.hide()
-        self.text_item.setAcceptedMouseButtons(Qt.NoButton)
-        self.text_item.setTextInteractionFlags(Qt.NoTextInteraction)
-        self.text_item.setAcceptHoverEvents(False)
-        self.text_item.setZValue(-1)
-
+        self.text_layout = None
+        self.auto_fit_target_ratio = 0.8
         self.is_typeset = False
         self.is_bubble = True
         self.bg_is_noisy = False
@@ -59,23 +63,33 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.stroke_width = 0
         self.stroke_color = QColor("white")
 
+        self.generated_mask = None
+
+    def rect(self):
+        """Backwards compatibility for methods expecting a rect."""
+        return self._rect if self.shape_type == "rect" else self.polygon().boundingRect()
+
     def boundingRect(self):
-        """Expand the invisible hit-box so we can grab the edges from the outside."""
         margin = float(self.handle_size)
-        return self.rect().adjusted(-margin, -margin, margin, margin)
+        if self.shape_type == "rect":
+            return self._rect.adjusted(-margin, -margin, margin, margin)
+        else:
+            return self.polygon().boundingRect().adjusted(-margin, -margin, margin, margin)
 
     def shape(self):
-        """Register the expanded hit-box for mouse hover events."""
         path = QPainterPath()
-        path.addRect(self.boundingRect())
+        if self.shape_type == "rect":
+            path.addRect(self.boundingRect())
+        else:
+            path.addPolygon(self.polygon())
+            s = self.handle_size
+            poly = self.polygon()
+            for i in range(poly.count()):
+                pt = poly[i]
+                path.addRect(pt.x() - s, pt.y() - s, s * 2, s * 2)
         return path
 
     def set_mask_display(self, mask_array):
-        import cv2
-        import numpy as np
-        from PySide6.QtGui import QImage, QPixmap
-        from PySide6.QtWidgets import QGraphicsPixmapItem
-
         h, w = mask_array.shape[:2]
 
         # Ensure mask is 8-bit single channel
@@ -106,19 +120,14 @@ class BoundingBoxItem(QGraphicsRectItem):
     def clear_mask_display(self):
         if hasattr(self, 'mask_item'):
             self.mask_item.hide()
-            from PySide6.QtGui import QPixmap
             self.mask_item.setPixmap(QPixmap())
         self.generated_mask = None
 
     def update_typeset(self):
-        r = self.rect()
-
-        self.text_item.document().setDocumentMargin(0)
-
-        usable_width = max(10.0, r.width() - (self.indent * 2))
-
-        self.text_item.setTextWidth(usable_width)
-        self.text_item.setPlainText(self.translated_text)
+        if not self.is_typeset or not self.translated_text.strip():
+            self.text_layout = None
+            self.update()
+            return
 
         font = QFont(self.font_family)
         font.setPixelSize(self.font_size)
@@ -126,131 +135,212 @@ class BoundingBoxItem(QGraphicsRectItem):
         font.setItalic(self.is_italic)
         font.setUnderline(self.is_underline)
         font.setStrikeOut(self.is_strikeout)
-        self.text_item.setFont(font)
-        self.text_item.setDefaultTextColor(self.text_color)
 
-        text_option = QTextOption()
-        text_option.setWrapMode(QTextOption.WordWrap)
-        text_option.setAlignment(self.align)
-        self.text_item.document().setDefaultTextOption(text_option)
+        self.text_layout = self._create_layout_for_polygon(self.translated_text, self.polygon(), font)
+        self.update()
 
-        from PySide6.QtGui import QTextCursor, QTextBlockFormat, QTextCharFormat, QPen
+    def _create_layout_for_polygon(self, text, polygon, font):
+        layout = QTextLayout(text, font)
 
-        def apply_formats():
-            cursor = QTextCursor(self.text_item.document())
-            cursor.select(QTextCursor.Document)
-            block_format = QTextBlockFormat()
-            block_format.setAlignment(self.align)
-            block_format.setLineHeight(self.line_spacing * 100.0, QTextBlockFormat.ProportionalHeight.value)
-            cursor.mergeBlockFormat(block_format)
+        option = QTextOption()
+        option.setWrapMode(QTextOption.WordWrap)
+        option.setAlignment(self.align)
+        layout.setTextOption(option)
 
-            char_format = QTextCharFormat()
-            char_format.setTextOutline(QPen(Qt.NoPen)) # Pure text, no buggy Qt strokes!
-            cursor.mergeCharFormat(char_format)
+        layout.beginLayout()
 
-        apply_formats()
+        font_metrics = QFontMetrics(font)
+        line_height = int(font_metrics.height() * self.line_spacing)
 
-        text_rect = self.text_item.boundingRect()
-        actual_text_w = text_rect.width()
+        current_y = polygon.boundingRect().top() + self.indent
 
-        # If an unbreakable word causes overflow, freeze the shorter lines into manual line breaks
-        if actual_text_w > usable_width + 1.0:
-            doc = self.text_item.document()
-            wrapped_lines = []
-            for i in range(doc.blockCount()):
-                block = doc.findBlockByNumber(i)
-                layout = block.layout()
-                if layout.lineCount() == 0:
-                    wrapped_lines.append("")
-                else:
-                    for j in range(layout.lineCount()):
-                        line = layout.lineAt(j)
-                        start = line.textStart()
-                        length = line.textLength()
-                        wrapped_lines.append(block.text()[start:start+length].strip())
+        while True:
+            line = layout.createLine()
+            if not line.isValid():
+                break
 
-            hard_text = "\n".join(wrapped_lines)
-            self.text_item.setPlainText(hard_text)
+            min_x, max_x = self.get_polygon_x_bounds_at_y(polygon, current_y, current_y + line_height)
 
-            actual_text_w = self.text_item.document().idealWidth()
-            self.text_item.setTextWidth(actual_text_w)
+            if min_x is None:
+                available_width = 0
+            else:
+                available_width = (max_x - min_x) - (self.indent * 2)
 
-            self.text_item.setFont(font)
-            apply_formats()
-            text_rect = self.text_item.boundingRect()
-            actual_text_w = text_rect.width()
+            if available_width <= 0:
+                available_width = 10
 
-        text_h = text_rect.height()
-        box_w = r.width()
-        box_h = r.height()
+            line.setLineWidth(available_width)
 
-        if self.align == Qt.AlignLeft: x_pos = r.left() + self.indent
-        elif self.align == Qt.AlignRight: x_pos = r.right() - self.indent - actual_text_w
-        else: x_pos = r.left() + (box_w - actual_text_w) / 2.0
+            if min_x is not None:
+                line.setPosition(QPointF(min_x + self.indent, current_y))
+            else:
+                line.setPosition(QPointF(polygon.boundingRect().left() + self.indent, current_y))
 
-        if self.valign == Qt.AlignTop: y_pos = r.top() + self.indent
-        elif self.valign == Qt.AlignBottom: y_pos = r.bottom() - text_h - self.indent
-        else: y_pos = r.top() + (box_h - text_h) / 2.0
+            current_y += line_height
 
-        self.text_item.setPos(x_pos, y_pos)
+        layout.endLayout()
 
-        # GENERATE PERFECT PHOTOSHOP-STYLE STROKE USING OPENCV
-        if self.stroke_width > 0 and self.is_typeset and self.translated_text.strip():
-            import cv2
-            import numpy as np
-            from PySide6.QtGui import QImage, QPainter, QPixmap
+        # Apply vertical alignment offset
+        if layout.lineCount() > 0:
+            last_line = layout.lineAt(layout.lineCount() - 1)
+            total_text_height = last_line.position().y() + line_height - (polygon.boundingRect().top() + self.indent)
 
-            pad = self.stroke_width + 4
-            tw, th = int(actual_text_w) + 2, int(text_h) + 2
+            poly_h = polygon.boundingRect().height() - (self.indent * 2)
 
-            # 1. Render Qt text layout to a transparent QImage
-            qimg = QImage(tw + pad*2, th + pad*2, QImage.Format_RGBA8888)
-            qimg.fill(Qt.transparent)
+            if self.valign == Qt.AlignVCenter:
+                y_offset = (poly_h - total_text_height) / 2.0
+            elif self.valign == Qt.AlignBottom:
+                y_offset = poly_h - total_text_height
+            else:
+                y_offset = 0
 
-            painter = QPainter(qimg)
-            painter.setRenderHint(QPainter.TextAntialiasing, True)
-            painter.setRenderHint(QPainter.Antialiasing, True)
-            painter.translate(pad, pad)
-            self.text_item.document().drawContents(painter)
-            painter.end()
+            if y_offset != 0:
+                for i in range(layout.lineCount()):
+                    line = layout.lineAt(i)
+                    line.setPosition(line.position() + QPointF(0, y_offset))
 
-            # 2. Convert QImage to Numpy safely
-            # PySide6 returns a memoryview natively, so we can feed it directly to numpy
-            arr = np.frombuffer(qimg.bits(), dtype=np.uint8).reshape((th + pad*2, tw + pad*2, 4)).copy()
+        return layout
 
-            alpha = arr[:, :, 3]
+    def get_polygon_x_bounds_at_y(self, polygon, y, next_y):
+        bounds = polygon.boundingRect()
+        slice_rect = QRectF(bounds.left() - 100, y, bounds.width() + 200, next_y - y)
 
-            # 3. Dilate the alpha channel mathematically (Zero holes, perfect rounding)
-            k_size = self.stroke_width * 2 + 1
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
-            dilated_alpha = cv2.dilate(alpha, kernel)
+        poly_path = QPainterPath()
+        poly_path.addPolygon(polygon)
 
-            # 4. Anti-alias the hard dilated edges slightly
-            dilated_alpha = cv2.GaussianBlur(dilated_alpha, (3, 3), 0)
+        slice_path = QPainterPath()
+        slice_path.addRect(slice_rect)
 
-            # 5. Paint the dilated silhouette with the exact stroke color
-            stroke_rgba = np.zeros((th + pad*2, tw + pad*2, 4), dtype=np.uint8)
-            r_c, g_c, b_c, _ = self.stroke_color.getRgb()
-            stroke_rgba[:, :, 0] = r_c
-            stroke_rgba[:, :, 1] = g_c
-            stroke_rgba[:, :, 2] = b_c
-            stroke_rgba[:, :, 3] = dilated_alpha
+        intersection = poly_path.intersected(slice_path)
+        if intersection.isEmpty():
+            return None, None
 
-            # 6. Apply to the background layer as a pure image
-            out_qimg = QImage(stroke_rgba.data, tw + pad*2, th + pad*2, (tw + pad*2)*4, QImage.Format_RGBA8888)
-            self.stroke_item.setPixmap(QPixmap.fromImage(out_qimg.copy()))
+        int_bounds = intersection.boundingRect()
+        return int_bounds.left(), int_bounds.right()
 
-            # 7. Slide it perfectly behind the text, offset by the padding
-            self.stroke_item.setPos(x_pos - pad, y_pos - pad)
-            self.stroke_item.setVisible(True)
+    def auto_fit_font_size(self):
+        if not self.translated_text.strip(): return
+
+        best_size = 8
+        low = 8
+        high = 100
+
+        font = QFont(self.font_family)
+        font.setBold(self.is_bold)
+        font.setItalic(self.is_italic)
+        font.setUnderline(self.is_underline)
+        font.setStrikeOut(self.is_strikeout)
+
+        poly_height = self.polygon().boundingRect().height() - (self.indent * 2)
+        target_height = poly_height * self.auto_fit_target_ratio
+
+        while low <= high:
+            mid = (low + high) // 2
+            font.setPixelSize(mid)
+            layout = self._create_layout_for_polygon(self.translated_text, self.polygon(), font)
+
+            total_height = 0
+            has_overflow = False
+
+            for i in range(layout.lineCount()):
+                line = layout.lineAt(i)
+                # WordWrap allows words to spill over the set width if they cannot be broken.
+                # We add a 2.0 pixel tolerance to avoid false positives from trailing spaces or anti-aliasing.
+                if line.naturalTextWidth() > line.width() + 2.0:
+                    has_overflow = True
+                    break
+
+            if layout.lineCount() > 0:
+                last_line = layout.lineAt(layout.lineCount() - 1)
+                total_height = last_line.position().y() + int(QFontMetrics(font).height() * self.line_spacing) - self.polygon().boundingRect().top() - self.indent
+
+            if not has_overflow and total_height <= target_height:
+                best_size = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+
+        self.font_size = best_size
+        self.update_typeset()
+
+    def set_vertex_count(self, n):
+        import math
+        bounds = self.rect()
+        cx = bounds.center().x()
+        cy = bounds.center().y()
+        rx = bounds.width() / 2.0
+        ry = bounds.height() / 2.0
+
+        new_poly = QPolygonF()
+        if n == 4:
+            self.shape_type = "rect"
+            self._rect = bounds
+            new_poly.append(QPointF(bounds.left(), bounds.top()))
+            new_poly.append(QPointF(bounds.right(), bounds.top()))
+            new_poly.append(QPointF(bounds.right(), bounds.bottom()))
+            new_poly.append(QPointF(bounds.left(), bounds.bottom()))
         else:
-            self.stroke_item.setVisible(False)
-            from PySide6.QtGui import QPixmap
-            self.stroke_item.setPixmap(QPixmap())
+            self.shape_type = "polygon"
+            # Start at 0 radians (right-most point) to ensure pointed left/right corners
+            # and flat edges at the top/bottom (ideal for horizontal text wrapping)
+            offset = 0
+            for i in range(n):
+                angle = offset + (i * 2 * math.pi / n)
+                px = cx + rx * math.cos(angle)
+                py = cy + ry * math.sin(angle)
+                new_poly.append(QPointF(px, py))
+
+        self.setPolygon(new_poly)
+        if self.is_typeset:
+            self.update_typeset()
+
+    def paint(self, painter, option, widget=None):
+        super().paint(painter, option, widget)
+
+        if self.is_typeset and self.text_layout:
+            painter.save()
+            if self.stroke_width > 0:
+                path = QPainterPath()
+                for i in range(self.text_layout.lineCount()):
+                    line = self.text_layout.lineAt(i)
+                    text = self.translated_text[line.textStart() : line.textStart() + line.textLength()]
+                    font_metrics = QFontMetrics(self.text_layout.font())
+                    baseline = line.position() + QPointF(0, font_metrics.ascent())
+                    path.addText(baseline, self.text_layout.font(), text)
+
+                pen = QPen(self.stroke_color, self.stroke_width * 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+                painter.setPen(pen)
+                painter.setBrush(self.stroke_color)
+                painter.drawPath(path)
+
+            painter.setPen(QPen(self.text_color))
+            self.text_layout.draw(painter, QPointF(0, 0))
+            painter.restore()
+
+        # Draw handles for the user to manipulate
+        if self.isSelected() and not self.is_typeset:
+            painter.save()
+            painter.setBrush(Qt.white)
+            painter.setPen(QPen(Qt.black, 1))
+            s = 8
+            if self.shape_type == "polygon":
+                poly = self.polygon()
+                for i in range(poly.count()):
+                    pt = poly[i]
+                    painter.drawRect(QRectF(pt.x() - s/2, pt.y() - s/2, s, s))
+            else:
+                r = self._rect
+                centers = [
+                    r.topLeft(), r.topRight(), r.bottomLeft(), r.bottomRight(),
+                    QPointF(r.left(), r.center().y()), QPointF(r.right(), r.center().y()),
+                    QPointF(r.center().x(), r.top()), QPointF(r.center().x(), r.bottom())
+                ]
+                for pt in centers:
+                    painter.drawRect(QRectF(pt.x() - s/2, pt.y() - s/2, s, s))
+            painter.restore()
 
     def toggle_typeset(self, force_state=None):
         self.is_typeset = force_state if force_state is not None else not self.is_typeset
-        self.text_item.setVisible(self.is_typeset)
 
         if self.is_typeset:
             self.update_typeset()
@@ -264,9 +354,10 @@ class BoundingBoxItem(QGraphicsRectItem):
             pen = QPen(QColor(255, 100, 100) if self.isSelected() else QColor(0, 255, 0), 2)
             pen.setCosmetic(True)
             self.setPen(pen)
+        self.update()
 
     def itemChange(self, change, value):
-        if change == QGraphicsRectItem.ItemSelectedHasChanged:
+        if change == QGraphicsPolygonItem.ItemSelectedHasChanged:
             if self.is_typeset:
                 if self.isSelected():
                     self.setPen(QPen(QColor(100, 100, 255), 1, Qt.DashLine))
@@ -281,11 +372,16 @@ class BoundingBoxItem(QGraphicsRectItem):
         return super().itemChange(change, value)
 
     def get_handle_at(self, pos):
-        r = self.rect()
-        x, y = pos.x(), pos.y()
+        if self.shape_type == "polygon":
+            poly = self.polygon()
+            for i in range(poly.count()):
+                pt = poly[i]
+                if abs(pt.x() - pos.x()) <= self.handle_size and abs(pt.y() - pos.y()) <= self.handle_size:
+                    return i
+            return self.NONE
 
-        # Prevent handle overlap on tiny boxes by limiting the INSIDE grab area,
-        # but keep the OUTSIDE grab area large (self.handle_size)
+        r = self._rect
+        x, y = pos.x(), pos.y()
         in_x = min(self.handle_size, r.width() / 3.0)
         in_y = min(self.handle_size, r.height() / 3.0)
         out = self.handle_size
@@ -311,11 +407,15 @@ class BoundingBoxItem(QGraphicsRectItem):
             return super().hoverMoveEvent(event)
 
         self.current_handle = self.get_handle_at(event.pos())
-        if self.current_handle in (self.TOP_LEFT, self.BOTTOM_RIGHT): self.setCursor(Qt.SizeFDiagCursor)
-        elif self.current_handle in (self.TOP_RIGHT, self.BOTTOM_LEFT): self.setCursor(Qt.SizeBDiagCursor)
-        elif self.current_handle in (self.LEFT, self.RIGHT): self.setCursor(Qt.SizeHorCursor)
-        elif self.current_handle in (self.TOP, self.BOTTOM): self.setCursor(Qt.SizeVerCursor)
-        else: self.setCursor(Qt.SizeAllCursor if self.isSelected() else Qt.ArrowCursor)
+        if self.current_handle == self.NONE:
+            self.setCursor(Qt.SizeAllCursor if self.isSelected() else Qt.ArrowCursor)
+        elif self.current_handle >= 0:
+            self.setCursor(Qt.CrossCursor)
+        else:
+            if self.current_handle in (self.TOP_LEFT, self.BOTTOM_RIGHT): self.setCursor(Qt.SizeFDiagCursor)
+            elif self.current_handle in (self.TOP_RIGHT, self.BOTTOM_LEFT): self.setCursor(Qt.SizeBDiagCursor)
+            elif self.current_handle in (self.LEFT, self.RIGHT): self.setCursor(Qt.SizeHorCursor)
+            elif self.current_handle in (self.TOP, self.BOTTOM): self.setCursor(Qt.SizeVerCursor)
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event):
@@ -331,13 +431,20 @@ class BoundingBoxItem(QGraphicsRectItem):
 
     def mouseMoveEvent(self, event):
         if self.resizing_handle != self.NONE:
-            rect, pos, min_size = self.rect(), event.pos(), 15
-            if self.resizing_handle in (self.LEFT, self.TOP_LEFT, self.BOTTOM_LEFT): rect.setLeft(min(pos.x(), rect.right() - min_size))
-            if self.resizing_handle in (self.RIGHT, self.TOP_RIGHT, self.BOTTOM_RIGHT): rect.setRight(max(pos.x(), rect.left() + min_size))
-            if self.resizing_handle in (self.TOP, self.TOP_LEFT, self.TOP_RIGHT): rect.setTop(min(pos.y(), rect.bottom() - min_size))
-            if self.resizing_handle in (self.BOTTOM, self.BOTTOM_LEFT, self.BOTTOM_RIGHT): rect.setBottom(max(pos.y(), rect.top() + min_size))
+            self.prepareGeometryChange()
+            if self.resizing_handle >= 0:
+                poly = self.polygon()
+                poly[self.resizing_handle] = event.pos()
+                self.setPolygon(poly)
+            else:
+                rect, pos, min_size = QRectF(self._rect), event.pos(), 15
+                if self.resizing_handle in (self.LEFT, self.TOP_LEFT, self.BOTTOM_LEFT): rect.setLeft(min(pos.x(), rect.right() - min_size))
+                if self.resizing_handle in (self.RIGHT, self.TOP_RIGHT, self.BOTTOM_RIGHT): rect.setRight(max(pos.x(), rect.left() + min_size))
+                if self.resizing_handle in (self.TOP, self.TOP_LEFT, self.TOP_RIGHT): rect.setTop(min(pos.y(), rect.bottom() - min_size))
+                if self.resizing_handle in (self.BOTTOM, self.BOTTOM_LEFT, self.BOTTOM_RIGHT): rect.setBottom(max(pos.y(), rect.top() + min_size))
+                self._rect = rect
+                self.setPolygon(QPolygonF(self._rect))
 
-            self.setRect(rect)
             if self.is_typeset:
                 self.update_typeset()
             event.accept()
