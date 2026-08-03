@@ -13,3 +13,5 @@ config.ini
 rev/
 models/
 .venv314/
+uv.lock
+.python-version

@@ -74,6 +74,11 @@ class SettingsDialog(QDialog):
         self.models_layout.addWidget(chk_mirror)
 
         global_btns_layout = QHBoxLayout()
+
+        self.btn_download_all = QPushButton("Download Available")
+        self.btn_download_all.setStyleSheet("font-weight: bold; padding: 8px;")
+        self.btn_download_all.clicked.connect(self.download_all_missing_models)
+
         btn_load_all = QPushButton("Load All Available")
         btn_load_all.setStyleSheet("font-weight: bold; padding: 8px;")
         btn_load_all.clicked.connect(self.load_all_models)
@@ -82,6 +87,7 @@ class SettingsDialog(QDialog):
         btn_unload_all.setStyleSheet("font-weight: bold; padding: 8px;")
         btn_unload_all.clicked.connect(self.unload_all_models)
 
+        global_btns_layout.addWidget(self.btn_download_all)
         global_btns_layout.addWidget(btn_load_all)
         global_btns_layout.addWidget(btn_unload_all)
 
@@ -90,7 +96,7 @@ class SettingsDialog(QDialog):
 
         self.model_widgets = {}
 
-        def add_model_ui(parent_layout, title, desc, load_key, repo_id, setting_key):
+        def add_model_ui(parent_layout, title, desc, load_key, repo_id, setting_key, add_separator=True):
             repo_getter = lambda r=repo_id: r() if callable(r) else r
             model_layout = QVBoxLayout()
 
@@ -125,7 +131,8 @@ class SettingsDialog(QDialog):
                                           self.main_window.settings.setValue(key, chk.isChecked()))
             model_layout.addWidget(chk_auto)
 
-            model_layout.addWidget(QLabel("<hr>"))
+            if add_separator:
+                model_layout.addWidget(QLabel("<hr>"))
             parent_layout.addLayout(model_layout)
 
             self.model_widgets[load_key] = {
@@ -241,7 +248,7 @@ class SettingsDialog(QDialog):
 
         nmt_layout.addWidget(QLabel("<hr>"))
         add_model_ui(nmt_layout, "NMT Engine", "Processes translation locally on your device.", "nmt_translator",
-                     lambda: self.main_window.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en"), "auto_load_nmt")
+                     lambda: self.main_window.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en"), "auto_load_nmt", add_separator=False)
         nmt_layout.addStretch()
         self.trans_stack.addWidget(nmt_page)
 
@@ -362,6 +369,17 @@ class SettingsDialog(QDialog):
         self.def_stroke_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.def_stroke_combo.currentTextChanged.connect(lambda t: self.main_window.settings.setValue("default_stroke_color", t.lower()))
         fd_layout.addWidget(self.def_stroke_combo, 5, 1)
+
+        lbl_auto_stroke = QLabel("Auto Stroke Size:")
+        lbl_auto_stroke.setToolTip("Size applied automatically to floating text over noisy backgrounds")
+        fd_layout.addWidget(lbl_auto_stroke, 5, 2)
+
+        self.auto_stroke_spin = QSpinBox()
+        self.auto_stroke_spin.setRange(1, 50)
+        self.auto_stroke_spin.setValue(int(self.main_window.settings.value("auto_stroke_size", 4)))
+        self.auto_stroke_spin.setToolTip("Size applied automatically to floating text over noisy backgrounds")
+        self.auto_stroke_spin.valueChanged.connect(lambda v: self.main_window.settings.setValue("auto_stroke_size", v))
+        fd_layout.addWidget(self.auto_stroke_spin, 5, 3)
 
         fonts_layout.addWidget(grp_defaults)
 
@@ -493,7 +511,7 @@ class SettingsDialog(QDialog):
         keybinds_main_layout.addWidget(scroll_area)
 
         # --- COMPILE TABS ---
-        self.tabs.addTab(models_tab, "Detection")
+        self.tabs.addTab(models_tab, "Models")
         self.tabs.addTab(trans_tab, "Translation")
         self.tabs.addTab(fonts_tab, "Fonts")
         self.tabs.addTab(keybinds_tab, "Keybinds")
@@ -599,7 +617,14 @@ class SettingsDialog(QDialog):
         engine = "google" if index == 0 else "nmt"
         self.main_window.settings.setValue("translation_engine", engine)
         self.trans_stack.setCurrentIndex(index)
+
+        # Free up RAM by unloading the local NMT model if the user switches to the Online API
+        if engine == "google":
+            if self.main_window.nmt_model is not None or self.main_window.nmt_is_loading:
+                self.main_window.unload_model("nmt_translator")
+
         self.main_window.update_button_states()
+        self.update_ui_state()
 
     def _on_nmt_repo_changed(self, index):
         new_repo = "facebook/nllb-200-distilled-600M" if index == 1 else "Helsinki-NLP/opus-mt-ja-en"
@@ -607,9 +632,12 @@ class SettingsDialog(QDialog):
         if new_repo != old_repo:
             self.main_window.settings.setValue("nmt_model_repo", new_repo)
             self._update_nmt_lang_states()
+
+            # Unload the old model to free RAM, but do NOT automatically load/download the new one.
+            # Wait for the user to explicitly click "Load Model" or "Download & Load".
             if self.main_window.nmt_model is not None or self.main_window.nmt_is_loading:
                 self.main_window.unload_model("nmt_translator")
-                self.main_window.load_model("nmt_translator")
+
             self.update_ui_state()
 
     def _update_nmt_lang_states(self):
@@ -648,6 +676,15 @@ class SettingsDialog(QDialog):
         self.nmt_tgt.setCurrentIndex(self.tgt_combo.currentIndex())
         self.nmt_src.blockSignals(False)
         self.nmt_tgt.blockSignals(False)
+
+    def download_all_missing_models(self):
+        target_keys = ["manga_ocr", "yolo_detector", "masking_model", "inpaint_model"]
+        for key in target_keys:
+            if key in self.model_widgets:
+                w_dict = self.model_widgets[key]
+                if not self.main_window.is_model_downloaded(w_dict["get_repo_id"]()):
+                    if key not in self.main_window.model_load_queue:
+                        self.main_window.load_model(key)
 
     def load_all_models(self):
         for key, w_dict in self.model_widgets.items():
@@ -761,5 +798,17 @@ class SettingsDialog(QDialog):
             inpaint_loading = self.main_window.inpaint_is_loading
             inpaint_queued = "inpaint_model" in q
             self._apply_state(inpaint_loaded, inpaint_loading, inpaint_queued, self.model_widgets["inpaint_model"])
+
+            # Verify if all models in the Model tab are present to grey out the download button
+            all_downloaded = True
+            target_keys = ["manga_ocr", "yolo_detector", "masking_model", "inpaint_model"]
+            for key in target_keys:
+                if key in self.model_widgets:
+                    w_dict = self.model_widgets[key]
+                    if not self.main_window.is_model_downloaded(w_dict["get_repo_id"]()):
+                        all_downloaded = False
+                        break
+            self.btn_download_all.setEnabled(not all_downloaded)
+
         except RuntimeError:
             pass

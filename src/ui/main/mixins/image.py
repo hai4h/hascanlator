@@ -167,7 +167,7 @@ class ImageOperationsMixin:
 
                 # Auto-apply a contrasting stroke if the background is noisy art
                 if bg_is_noisy and box.stroke_width == 0:
-                    box.stroke_width = 4
+                    box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
                     from PySide6.QtGui import QColor
                     if box.text_color.lightness() < 128:
                         box.stroke_color = QColor("white")
