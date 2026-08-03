@@ -119,9 +119,25 @@ class InpaintingWorker(QThread):
             total = len(self.boxes_data)
             orig_h, orig_w = res_img.shape[:2]
 
-            for i, (bx, by, bw, bh, bmask) in enumerate(self.boxes_data):
+            for i, box_data in enumerate(self.boxes_data):
+                bx, by, bw, bh, bmask = box_data[:5]
+                bg_is_noisy = box_data[5] if len(box_data) > 5 else True
+
                 if bmask.shape[:2] != (bh, bw):
                     bmask = cv2.resize(bmask, (bw, bh), interpolation=cv2.INTER_NEAREST)
+
+                # FAST PATH: If the background is uniform (not noisy), skip LaMa.
+                # LaMa struggles to output pure black/white and leaves visible smudges.
+                # OpenCV's Telea inpainting perfectly propagates solid colors without artifacts.
+                if not bg_is_noisy:
+                    bmask_np = bmask.astype(np.uint8)
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                    telea_mask = cv2.dilate(bmask_np, kernel)
+
+                    inpainted_roi = cv2.inpaint(res_img[by:by+bh, bx:bx+bw], telea_mask, 7, cv2.INPAINT_TELEA)
+                    res_img[by:by+bh, bx:bx+bw] = inpainted_roi
+                    self.progress_percent.emit(int(((i + 1) / total) * 100))
+                    continue
 
                 # 1. Determine a scale to ensure the box fits inside a 512x512 window with margin.
                 # We cap the box size to 400x400 to guarantee LaMa always has at least 56px of real background context around it.

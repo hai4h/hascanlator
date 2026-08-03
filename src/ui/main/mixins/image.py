@@ -148,31 +148,48 @@ class ImageOperationsMixin:
                     text_lightness = box.text_color.lightness()
                     contrast = abs(bg_mean - text_lightness)
 
-                    # --- BACKGROUND TYPE CLASSIFICATION ---
-                    # Noisy if it has art lines, high variance (screentones), or low contrast
-                    if edge_ratio > 0.01 or bg_std > 20 or contrast < 80:
-                        bg_is_noisy = True
-                    else:
-                        bg_is_noisy = False
-
-                    # --- SPEECH BUBBLE CLASSIFICATION ---
-                    # Very pure white or black region (This will be used for auto-expand logic later)
+                    # --- UNIFORMITY & BUBBLE CLASSIFICATION ---
+                    # A background is a clean bubble if it's overwhelmingly solid white or black
                     if white_ratio > 0.85 or black_ratio > 0.85:
                         is_bubble = True
+                        bg_is_noisy = False
                     else:
                         is_bubble = False
+                        # Noisy if it has drawn art edges or high variance (screentones)
+                        if edge_ratio > 0.01 or bg_std > 20:
+                            bg_is_noisy = True
+                        else:
+                            bg_is_noisy = False
+
+                    # --- MASK ENHANCEMENT FOR DARK BACKGROUNDS ---
+                    # White text blooms heavily on black backgrounds. We aggressively dilate
+                    # the mask so inpainting doesn't smudge unmasked white halos.
+                    if black_ratio > 0.5:
+                        kernel_expand = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+                        mask_roi = cv2.dilate(mask_roi, kernel_expand, iterations=2)
+                        box.generated_mask = mask_roi
+                        box.set_mask_display(mask_roi)
 
                 box.is_bubble = is_bubble
                 box.bg_is_noisy = bg_is_noisy
 
-                # Auto-apply a contrasting stroke if the background is noisy art
-                if bg_is_noisy and box.stroke_width == 0:
-                    box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
+                # --- AUTO-STYLING FOR LEGIBILITY ---
+                # If text blends into the background (low contrast), fix it.
+                if contrast < 80:
                     from PySide6.QtGui import QColor
-                    if box.text_color.lightness() < 128:
-                        box.stroke_color = QColor("white")
+                    if bg_is_noisy:
+                        # For noisy art backgrounds, add a contrasting stroke
+                        if box.stroke_width == 0:
+                            box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
+                            box.stroke_color = QColor("white") if bg_mean < 128 else QColor("black")
                     else:
-                        box.stroke_color = QColor("black")
+                        # For clean speech bubbles, flip the text color to contrast the bubble
+                        box.text_color = QColor("white") if bg_mean < 128 else QColor("black")
+                elif bg_is_noisy and box.stroke_width == 0:
+                    # Noisy background with high contrast text still benefits from a stroke
+                    from PySide6.QtGui import QColor
+                    box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
+                    box.stroke_color = QColor("white") if box.text_color.lightness() < 128 else QColor("black")
 
         auto_inpaint = getattr(self, '_pending_auto_inpaint', False)
         commit = getattr(self, '_pending_mask_commit', True)
@@ -240,7 +257,7 @@ class ImageOperationsMixin:
             w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
             if w <= 0 or h <= 0: continue
 
-            boxes_data.append((x, y, w, h, mask))
+            boxes_data.append((x, y, w, h, mask, box.bg_is_noisy))
 
         if not boxes_data:
             return
