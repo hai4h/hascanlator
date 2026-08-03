@@ -687,26 +687,29 @@ class SettingsDialog(QDialog):
                         self.main_window.load_model(key)
 
     def load_all_models(self):
-        for key, w_dict in self.model_widgets.items():
-            if not self.main_window.is_model_downloaded(w_dict["get_repo_id"]()): continue
-            if key not in self.main_window.model_load_queue:
+        target_keys = ["manga_ocr", "yolo_detector", "masking_model", "inpaint_model"]
+        for key in target_keys:
+            if key in self.model_widgets:
+                w_dict = self.model_widgets[key]
+                if not self.main_window.is_model_downloaded(w_dict["get_repo_id"]()): continue
+                if key not in self.main_window.model_load_queue:
+                    is_loaded = False
+                    if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
+                    if key == "yolo_detector" and self.main_window.yolo_model: is_loaded = True
+                    if key == "masking_model" and self.main_window.masking_model: is_loaded = True
+                    if key == "inpaint_model" and self.main_window.inpaint_model: is_loaded = True
+                    if not is_loaded: self.main_window.load_model(key)
+
+    def unload_all_models(self):
+        target_keys = ["manga_ocr", "yolo_detector", "masking_model", "inpaint_model"]
+        for key in target_keys:
+            if key in self.model_widgets:
                 is_loaded = False
                 if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
                 if key == "yolo_detector" and self.main_window.yolo_model: is_loaded = True
-                if key == "nmt_translator" and self.main_window.nmt_model: is_loaded = True
                 if key == "masking_model" and self.main_window.masking_model: is_loaded = True
                 if key == "inpaint_model" and self.main_window.inpaint_model: is_loaded = True
-                if not is_loaded: self.main_window.load_model(key)
-
-    def unload_all_models(self):
-        for key in self.model_widgets.keys():
-            is_loaded = False
-            if key == "manga_ocr" and self.main_window.mocr_model: is_loaded = True
-            if key == "yolo_detector" and self.main_window.yolo_model: is_loaded = True
-            if key == "nmt_translator" and self.main_window.nmt_model: is_loaded = True
-            if key == "masking_model" and self.main_window.masking_model: is_loaded = True
-            if key == "inpaint_model" and self.main_window.inpaint_model: is_loaded = True
-            if is_loaded: self.main_window.unload_model(key)
+                if is_loaded: self.main_window.unload_model(key)
 
     def delete_model(self, load_key, repo_id):
         reply = QMessageBox.question(self, "Confirm Deletion", "Are you sure you want to delete this model from your disk? You will need to redownload it next time.", QMessageBox.Yes | QMessageBox.No)
