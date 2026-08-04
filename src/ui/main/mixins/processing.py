@@ -5,7 +5,28 @@ from src.core.translation import BatchTranslationWorker
 from src.ui.canvas.items import BoundingBoxItem
 
 class WorkerProcessingMixin:
-    # --- DETECTION & OCR LOGIC ---
+    def __init__(self):
+        self._active_workers = []
+
+    def _register_worker(self, worker):
+        """Prevents QThread memory leaks by tracking and auto-cleaning workers."""
+        self._active_workers.append(worker)
+        worker.finished.connect(lambda w=worker: self._cleanup_worker(w))
+        return worker
+
+    def _cleanup_worker(self, worker):
+        if worker in self._active_workers:
+            self._active_workers.remove(worker)
+        worker.deleteLater()
+
+    def _cleanup_pipeline(self):
+        self._is_auto_scan_pipeline = False
+        self._active_pipeline_boxes = []
+        self._pipeline_flags = {}
+        self.progress_bar.setVisible(False)
+        self.set_processing_lock(False)
+        self.update_window_title()
+        
     def _get_translation_requirements(self, boxes):
         reqs = []
         engine = self.settings.value("translation_engine", "google")
@@ -46,15 +67,6 @@ class WorkerProcessingMixin:
             self.ocr_worker.start()
             return True
         return False
-
-    def _cleanup_pipeline(self):
-        """Resets the pipeline states to prevent locked ghost jobs."""
-        self._is_auto_scan_pipeline = False
-        self._active_pipeline_boxes = []
-        self._pipeline_flags = {}
-        self.progress_bar.setVisible(False)
-        self.set_processing_lock(False)
-        self.update_window_title()
 
     def _execute_pipeline_clean_typeset(self):
         """Final execution arm in the auto-process sequence."""
@@ -142,7 +154,7 @@ class WorkerProcessingMixin:
         self.progress_bar.setRange(0, 0)
         self.statusBar().showMessage("Detecting text regions...")
 
-        self.detect_worker = DetectionWorker(self.workspace.current_image_path, self.yolo_model)
+        self.detect_worker = self._register_worker(DetectionWorker(self.workspace.current_image_path, self.yolo_model))
         self.detect_worker.process_finished.connect(self.on_detection_finished)
         self.detect_worker.error.connect(self.on_detection_error)
         self.detect_worker.start()
@@ -169,7 +181,7 @@ class WorkerProcessingMixin:
                                 int(b.sceneBoundingRect().width()), int(b.sceneBoundingRect().height())), b)
                               for b in new_boxes]
 
-                self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
+                self.ocr_worker = self._register_worker(BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data))
                 self.ocr_worker.progress.connect(self.on_ocr_progress)
                 self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
                 self.ocr_worker.process_finished.connect(self.on_batch_ocr_finished)
@@ -372,7 +384,7 @@ class WorkerProcessingMixin:
         src_lang = self.settings.value("trans_src", "ja")
         tgt_lang = self.settings.value("trans_tgt", "en")
 
-        self.translation_worker = BatchTranslationWorker(engine, self.nmt_model, boxes_data, src_lang, tgt_lang)
+        self.translation_worker = self._register_worker(BatchTranslationWorker(engine, self.nmt_model, boxes_data, src_lang, tgt_lang))
         self.translation_worker.progress.connect(self.on_translation_progress)
         self.translation_worker.progress_percent.connect(self.progress_bar.setValue)
         self.translation_worker.process_finished.connect(self.on_batch_translation_finished)

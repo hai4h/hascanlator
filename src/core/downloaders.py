@@ -1,4 +1,3 @@
-# src/core/downloaders.py
 from PySide6.QtCore import QThread, Signal
 import urllib.request
 import zipfile

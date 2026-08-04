@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QFormLayout, QKeySequenceEdit, QScrollArea
 )
 from PySide6.QtCore import Qt, QUrl, QThread, Signal
-from PySide6.QtGui import QFont, QDesktopServices, QKeySequence
+from PySide6.QtGui import QFont, QDesktopServices, QKeySequence, QFontDatabase
 from huggingface_hub import scan_cache_dir
 
 class AdaptiveKeySequenceEdit(QKeySequenceEdit):
@@ -52,9 +52,8 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings & Model Manager")
 
         screen_geom = self.screen().availableGeometry()
-        self.resize(int(screen_geom.width() * 0.4), int(screen_geom.height() * 0.6))
-        self.setMinimumSize(650, 600)
-
+        self.resize(int(screen_geom.width() * 0.5), int(screen_geom.height() * 0.65))
+        self.setMinimumSize(800, 600)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
         self.main_window.model_status_changed.connect(self.update_ui_state)
@@ -286,17 +285,28 @@ class SettingsDialog(QDialog):
         # TAB 3: FONTS SETTINGS
         # ==========================================
         fonts_tab = QWidget()
-        fonts_layout = QVBoxLayout(fonts_tab)
+        fonts_main_layout = QVBoxLayout(fonts_tab)
+        fonts_main_layout.setContentsMargins(0, 0, 0, 0)
+
+        fonts_scroll = QScrollArea()
+        fonts_scroll.setWidgetResizable(True)
+        fonts_scroll.setFrameShape(QScrollArea.NoFrame)
+
+        fonts_content = QWidget()
+        fonts_layout = QVBoxLayout(fonts_content)
 
         # --- Default Font Configuration ---
         grp_defaults = QGroupBox("Default Font Properties")
         fd_layout = QGridLayout(grp_defaults)
 
         fd_layout.addWidget(QLabel("Family:"), 0, 0)
-        self.def_font_combo = QFontComboBox()
+        self.def_font_combo = QComboBox()
+        self.def_font_combo.addItems(QFontDatabase.families())
         def_fam = self.main_window.settings.value("default_font_family", "sans-serif")
-        self.def_font_combo.setCurrentFont(QFont(def_fam))
-        self.def_font_combo.currentFontChanged.connect(lambda f: self.main_window.settings.setValue("default_font_family", f.family()))
+        idx_fam = self.def_font_combo.findText(def_fam, Qt.MatchContains)
+        if idx_fam >= 0:
+            self.def_font_combo.setCurrentIndex(idx_fam)
+        self.def_font_combo.currentTextChanged.connect(lambda f: self.main_window.settings.setValue("default_font_family", f))
         fd_layout.addWidget(self.def_font_combo, 0, 1, 1, 3)
 
         fd_layout.addWidget(QLabel("Size:"), 1, 0)
@@ -370,18 +380,54 @@ class SettingsDialog(QDialog):
         self.def_stroke_combo.currentTextChanged.connect(lambda t: self.main_window.settings.setValue("default_stroke_color", t.lower()))
         fd_layout.addWidget(self.def_stroke_combo, 5, 1)
 
-        lbl_auto_stroke = QLabel("Auto Stroke Size:")
-        lbl_auto_stroke.setToolTip("Size applied automatically to floating text over noisy backgrounds")
-        fd_layout.addWidget(lbl_auto_stroke, 5, 2)
+        fonts_layout.addWidget(grp_defaults)
 
+        # --- Smart Auto-Styling ---
+        grp_auto_style = QGroupBox("Smart Auto-Styling (Enhances Legibility on Mask Generation)")
+        auto_style_layout = QVBoxLayout(grp_auto_style)
+
+        self.chk_auto_style_enabled = QCheckBox("Enable Smart Auto-Styling")
+        self.chk_auto_style_enabled.setChecked(self.main_window.settings.value("auto_style_enabled", True, type=bool))
+        self.chk_auto_style_enabled.stateChanged.connect(lambda: self.main_window.settings.setValue("auto_style_enabled", self.chk_auto_style_enabled.isChecked()))
+        auto_style_layout.addWidget(self.chk_auto_style_enabled)
+
+        auto_options_layout = QVBoxLayout()
+        auto_options_layout.setContentsMargins(20, 0, 0, 0)
+
+        self.chk_auto_style_color = QCheckBox("Auto-flip text color (Black/White) based on background")
+        self.chk_auto_style_color.setChecked(self.main_window.settings.value("auto_style_color", True, type=bool))
+        self.chk_auto_style_color.stateChanged.connect(lambda: self.main_window.settings.setValue("auto_style_color", self.chk_auto_style_color.isChecked()))
+        auto_options_layout.addWidget(self.chk_auto_style_color)
+
+        stroke_size_layout = QHBoxLayout()
+        self.chk_auto_style_stroke = QCheckBox("Auto-apply stroke on noisy or gray backgrounds")
+        self.chk_auto_style_stroke.setChecked(self.main_window.settings.value("auto_style_stroke", True, type=bool))
+        self.chk_auto_style_stroke.stateChanged.connect(lambda: self.main_window.settings.setValue("auto_style_stroke", self.chk_auto_style_stroke.isChecked()))
+        stroke_size_layout.addWidget(self.chk_auto_style_stroke)
+
+        stroke_size_layout.addSpacing(10)
+        stroke_size_layout.addWidget(QLabel("Stroke Size:"))
         self.auto_stroke_spin = QSpinBox()
         self.auto_stroke_spin.setRange(1, 50)
         self.auto_stroke_spin.setValue(int(self.main_window.settings.value("auto_stroke_size", 4)))
-        self.auto_stroke_spin.setToolTip("Size applied automatically to floating text over noisy backgrounds")
         self.auto_stroke_spin.valueChanged.connect(lambda v: self.main_window.settings.setValue("auto_stroke_size", v))
-        fd_layout.addWidget(self.auto_stroke_spin, 5, 3)
+        stroke_size_layout.addWidget(self.auto_stroke_spin)
+        stroke_size_layout.addStretch()
 
-        fonts_layout.addWidget(grp_defaults)
+        auto_options_layout.addLayout(stroke_size_layout)
+        auto_style_layout.addLayout(auto_options_layout)
+
+        # Disable sub-options if master is disabled
+        def _toggle_auto_style_opts(state):
+            is_enabled = (state == Qt.Checked.value) if isinstance(state, int) else state
+            self.chk_auto_style_color.setEnabled(is_enabled)
+            self.chk_auto_style_stroke.setEnabled(is_enabled)
+            self.auto_stroke_spin.setEnabled(is_enabled)
+
+        self.chk_auto_style_enabled.stateChanged.connect(_toggle_auto_style_opts)
+        _toggle_auto_style_opts(self.chk_auto_style_enabled.isChecked())
+
+        fonts_layout.addWidget(grp_auto_style)
 
         # --- Custom Local Fonts ---
         fonts_info = QLabel("<b>Custom Fonts Directory</b><br>Drop .ttf or .otf files into the local fonts folder to use them.")
@@ -418,6 +464,9 @@ class SettingsDialog(QDialog):
         btn_fonts_layout.addWidget(btn_open_folder)
         btn_fonts_layout.addWidget(btn_reload)
         fonts_layout.addLayout(btn_fonts_layout)
+
+        fonts_scroll.setWidget(fonts_content)
+        fonts_main_layout.addWidget(fonts_scroll)
 
         # ==========================================
         # TAB 4: KEYBINDS
@@ -607,8 +656,15 @@ class SettingsDialog(QDialog):
         for font in self.main_window.external_fonts:
             self.font_list.addItem(font)
 
+        self.def_font_combo.blockSignals(True)
+        self.def_font_combo.clear()
+        self.def_font_combo.addItems(QFontDatabase.families())
+
         def_fam = self.main_window.settings.value("default_font_family", "sans-serif")
-        self.def_font_combo.setCurrentFont(QFont(def_fam))
+        idx_fam = self.def_font_combo.findText(def_fam, Qt.MatchContains)
+        if idx_fam >= 0:
+            self.def_font_combo.setCurrentIndex(idx_fam)
+        self.def_font_combo.blockSignals(False)
 
         self._update_font_dl_btn_state()
 

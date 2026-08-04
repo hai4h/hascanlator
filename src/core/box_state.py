@@ -1,7 +1,6 @@
-# src/core/box_state.py
 from dataclasses import dataclass, field
-from PySide6.QtCore import QPointF, Qt, QPolygonF
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPolygonF
 import cv2
 import numpy as np
 
@@ -16,6 +15,7 @@ class BoxState:
     is_typeset: bool = False
     is_bubble: bool = True
     bg_is_noisy: bool = False
+    bg_is_solid: bool = False
     align: Qt.AlignmentFlag = Qt.AlignCenter
     valign: Qt.AlignmentFlag = Qt.AlignVCenter
     indent: int = 5
@@ -56,6 +56,7 @@ class BoxState:
             is_typeset=item.is_typeset,
             is_bubble=item.is_bubble,
             bg_is_noisy=item.bg_is_noisy,
+            bg_is_solid=getattr(item, 'bg_is_solid', False),
             align=item.align,
             valign=item.valign,
             indent=item.indent,
@@ -79,6 +80,7 @@ class BoxState:
         item.translated_text = self.translated_text
         item.is_bubble = self.is_bubble
         item.bg_is_noisy = self.bg_is_noisy
+        item.bg_is_solid = self.bg_is_solid
         item.align = self.align
         item.valign = self.valign
         item.indent = self.indent
@@ -93,11 +95,11 @@ class BoxState:
         item.stroke_color = QColor(self.stroke_color)
         item.stroke_width = self.stroke_width
         item.auto_fit_target_ratio = self.auto_fit_target_ratio
-        
+
         mask = self.decode_mask(self.generated_mask)
         item.generated_mask = mask
         if mask is not None:
             item.set_mask_display(mask)
-            
+
         if self.is_typeset:
             item.toggle_typeset(force_state=True)

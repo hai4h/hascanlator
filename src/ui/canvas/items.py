@@ -147,7 +147,37 @@ class BoundingBoxItem(QGraphicsPolygonItem):
 
             pad = self.stroke_width + 4
             rect = self.polygon().boundingRect()
-            tw, th = max(1, int(rect.width())), max(1, int(rect.height()))
+
+            # Find the true rendered bounds including any overflowing words
+            min_x, max_x = rect.left(), rect.right()
+            min_y, max_y = rect.top(), rect.bottom()
+
+            if self.text_layout:
+                for i in range(self.text_layout.lineCount()):
+                    line = self.text_layout.lineAt(i)
+                    nw = line.naturalTextWidth()
+                    w = line.width()
+                    px = line.position().x()
+                    py = line.position().y()
+
+                    if self.align == Qt.AlignCenter or self.align == Qt.AlignHCenter:
+                        overflow = max(0, nw - w)
+                        lx = px - overflow / 2.0
+                        rx = px + w + overflow / 2.0
+                    elif self.align == Qt.AlignRight:
+                        overflow = max(0, nw - w)
+                        lx = px - overflow
+                        rx = px + w
+                    else: # Left align
+                        lx = px
+                        rx = px + max(nw, w)
+
+                    min_x = min(min_x, lx)
+                    max_x = max(max_x, rx)
+                    min_y = min(min_y, py)
+                    max_y = max(max_y, py + line.height())
+
+            tw, th = max(1, int(max_x - min_x) + 2), max(1, int(max_y - min_y) + 2)
 
             qimg = QImage(tw + pad*2, th + pad*2, QImage.Format_RGBA8888)
             qimg.fill(Qt.transparent)
@@ -157,7 +187,7 @@ class BoundingBoxItem(QGraphicsPolygonItem):
             painter.setRenderHint(QPainter.Antialiasing, True)
 
             # Offset the painter so the text layout draws perfectly inside our padded QImage
-            painter.translate(-rect.left() + pad, -rect.top() + pad)
+            painter.translate(-min_x + pad, -min_y + pad)
             painter.setPen(QPen(Qt.black))
             self.text_layout.draw(painter, QPointF(0, 0))
             painter.end()
@@ -183,7 +213,7 @@ class BoundingBoxItem(QGraphicsPolygonItem):
 
             out_qimg = QImage(stroke_rgba.data, tw + pad*2, th + pad*2, (tw + pad*2)*4, QImage.Format_RGBA8888)
             self.stroke_pixmap = QPixmap.fromImage(out_qimg.copy())
-            self.stroke_offset = QPointF(rect.left() - pad, rect.top() - pad)
+            self.stroke_offset = QPointF(min_x - pad, min_y - pad)
         else:
             self.stroke_pixmap = None
 

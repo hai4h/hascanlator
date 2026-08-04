@@ -121,15 +121,15 @@ class InpaintingWorker(QThread):
 
             for i, box_data in enumerate(self.boxes_data):
                 bx, by, bw, bh, bmask = box_data[:5]
-                bg_is_noisy = box_data[5] if len(box_data) > 5 else True
+                is_solid = box_data[5] if len(box_data) > 5 else False
 
                 if bmask.shape[:2] != (bh, bw):
                     bmask = cv2.resize(bmask, (bw, bh), interpolation=cv2.INTER_NEAREST)
 
-                # FAST PATH: If the background is uniform (not noisy), skip LaMa.
-                # LaMa struggles to output pure black/white and leaves visible smudges.
+                # FAST PATH: If the background is strictly uniform (pure solid color), skip LaMa.
                 # OpenCV's Telea inpainting perfectly propagates solid colors without artifacts.
-                if not bg_is_noisy:
+                # Gradients, screentones, and noisy art should route to LaMa.
+                if is_solid:
                     bmask_np = bmask.astype(np.uint8)
                     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
                     telea_mask = cv2.dilate(bmask_np, kernel)

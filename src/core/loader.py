@@ -1,4 +1,3 @@
-# src/core/loader.py
 from PySide6.QtCore import QThread, Signal
 from abc import ABC, abstractmethod
 import os

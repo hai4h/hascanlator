@@ -6,6 +6,20 @@ from PySide6.QtCore import Qt, QRectF
 from src.ui.canvas.items import BoundingBoxItem
 
 class ImageOperationsMixin:
+    def __init__(self):
+        self._active_workers = []
+
+    def _register_worker(self, worker):
+        """Prevents QThread memory leaks by tracking and auto-cleaning workers."""
+        self._active_workers.append(worker)
+        worker.finished.connect(lambda w=worker: self._cleanup_worker(w))
+        return worker
+
+    def _cleanup_worker(self, worker):
+        if worker in self._active_workers:
+            self._active_workers.remove(worker)
+        worker.deleteLater()
+
     #  OPENCV IMAGE HELPERS
     def imread_utf8(self, filepath):
         """Allows cv2 to load files that contain non-ascii characters in their folder path."""
@@ -77,7 +91,7 @@ class ImageOperationsMixin:
         self.statusBar().showMessage("Running masking model on full page...")
 
         from src.core.detection import MaskingWorker
-        self.mask_worker = MaskingWorker(self.masking_model, img)
+        self.mask_worker = self._register_worker(MaskingWorker(self.masking_model, img))
         self.mask_worker.process_finished.connect(self.on_mask_generated)
         self.mask_worker.error.connect(self.on_mask_error)
         self.mask_worker.start()
@@ -129,10 +143,12 @@ class ImageOperationsMixin:
 
                 is_bubble = True
                 bg_is_noisy = False
+                is_solid = False
+                bg_mean = 255.0
 
                 if len(bg_pixels) > 0:
-                    bg_mean = np.mean(bg_pixels)
-                    bg_std = np.std(bg_pixels)
+                    bg_mean = float(np.mean(bg_pixels))
+                    bg_std = float(np.std(bg_pixels))
 
                     # 1. Edge Detection (Detects drawing lines, panel borders, picture frames)
                     edges = cv2.Canny(gray_roi, 50, 150)
@@ -145,51 +161,55 @@ class ImageOperationsMixin:
                     white_ratio = np.sum(bg_pixels > 230) / len(bg_pixels)
                     black_ratio = np.sum(bg_pixels < 25) / len(bg_pixels)
 
-                    text_lightness = box.text_color.lightness()
-                    contrast = abs(bg_mean - text_lightness)
+                    # A solid background has near zero standard deviation (e.g. pure white, black, or flat gray)
+                    is_solid = bool(bg_std < 5.0 or white_ratio > 0.95 or black_ratio > 0.95)
 
-                    # --- UNIFORMITY & BUBBLE CLASSIFICATION ---
-                    # A background is a clean bubble if it's overwhelmingly solid white or black
-                    if white_ratio > 0.85 or black_ratio > 0.85:
-                        is_bubble = True
-                        bg_is_noisy = False
-                    else:
-                        is_bubble = False
-                        # Noisy if it has drawn art edges or high variance (screentones)
-                        if edge_ratio > 0.01 or bg_std > 20:
-                            bg_is_noisy = True
-                        else:
-                            bg_is_noisy = False
+                    # A clean bubble/box has very few sharp internal drawn lines
+                    is_clean_box = bool(edge_ratio < 0.01)
 
                     # --- MASK ENHANCEMENT FOR DARK BACKGROUNDS ---
-                    # White text blooms heavily on black backgrounds. We aggressively dilate
+                    # White text blooms heavily on dark backgrounds. We aggressively dilate
                     # the mask so inpainting doesn't smudge unmasked white halos.
-                    if black_ratio > 0.5:
+                    if bg_mean < 100:
                         kernel_expand = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
                         mask_roi = cv2.dilate(mask_roi, kernel_expand, iterations=2)
                         box.generated_mask = mask_roi
                         box.set_mask_display(mask_roi)
 
+                    is_bubble = is_clean_box
+                    bg_is_noisy = not is_clean_box
+
+                box.bg_is_solid = is_solid
                 box.is_bubble = is_bubble
                 box.bg_is_noisy = bg_is_noisy
 
                 # --- AUTO-STYLING FOR LEGIBILITY ---
-                # If text blends into the background (low contrast), fix it.
-                if contrast < 80:
+                if self.settings.value("auto_style_enabled", True, type=bool):
                     from PySide6.QtGui import QColor
-                    if bg_is_noisy:
-                        # For noisy art backgrounds, add a contrasting stroke
-                        if box.stroke_width == 0:
-                            box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
-                            box.stroke_color = QColor("white") if bg_mean < 128 else QColor("black")
+
+                    do_color = self.settings.value("auto_style_color", True, type=bool)
+                    do_stroke = self.settings.value("auto_style_stroke", True, type=bool)
+
+                    # Grays between 70 and 185 lack strong contrast with both black and white text.
+                    is_mid_gray = 70 < bg_mean < 185
+
+                    if box.is_bubble:
+                        if is_mid_gray:
+                            # Box is gray/gradient: needs a stroke to pop
+                            if do_color:
+                                box.text_color = QColor("black") if bg_mean > 127 else QColor("white")
+                            if do_stroke and box.stroke_width == 0:
+                                box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
+                                box.stroke_color = QColor("white") if box.text_color.name() == "#000000" else QColor("black")
+                        else:
+                            # Box is clearly light or dark: flip text color, no stroke needed
+                            if do_color:
+                                box.text_color = QColor("black") if bg_mean >= 185 else QColor("white")
                     else:
-                        # For clean speech bubbles, flip the text color to contrast the bubble
-                        box.text_color = QColor("white") if bg_mean < 128 else QColor("black")
-                elif bg_is_noisy and box.stroke_width == 0:
-                    # Noisy background with high contrast text still benefits from a stroke
-                    from PySide6.QtGui import QColor
-                    box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
-                    box.stroke_color = QColor("white") if box.text_color.lightness() < 128 else QColor("black")
+                        # Background is noisy art: always apply stroke to separate text from art
+                        if do_stroke and box.stroke_width == 0:
+                            box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
+                            box.stroke_color = QColor("white") if box.text_color.lightness() < 128 else QColor("black")
 
         auto_inpaint = getattr(self, '_pending_auto_inpaint', False)
         commit = getattr(self, '_pending_mask_commit', True)
@@ -257,7 +277,7 @@ class ImageOperationsMixin:
             w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
             if w <= 0 or h <= 0: continue
 
-            boxes_data.append((x, y, w, h, mask, box.bg_is_noisy))
+            boxes_data.append((x, y, w, h, mask, getattr(box, 'bg_is_solid', False)))
 
         if not boxes_data:
             return
@@ -273,7 +293,7 @@ class ImageOperationsMixin:
         self.statusBar().showMessage(f"Inpainting {len(boxes_data)} regions...")
 
         from src.core.detection import InpaintingWorker
-        self.inpaint_worker = InpaintingWorker(self.inpaint_model, img, boxes_data)
+        self.inpaint_worker = self._register_worker(InpaintingWorker(self.inpaint_model, img, boxes_data))
         self.inpaint_worker.progress_percent.connect(self.progress_bar.setValue)
         self.inpaint_worker.process_finished.connect(self.on_inpaint_finished)
         self.inpaint_worker.error.connect(self.on_inpaint_error)

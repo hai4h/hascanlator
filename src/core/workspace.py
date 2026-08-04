@@ -1,4 +1,3 @@
-# src/core/workspace.py
 import os
 import tempfile
 import cv2
@@ -17,7 +16,7 @@ class BoundedImageCache(OrderedDict):
         if key in self:
             self.move_to_end(key)
         super().__setitem__(key, value)
-        
+
         while len(self) > self.max_entries:
             evicted_key, _ = self.popitem(last=False)
             self.workspace_ref._spill_to_disk(evicted_key)
@@ -31,10 +30,10 @@ class WorkspaceManager:
         self._temp_dir = tempfile.mkdtemp(prefix="hascanlator_")
         self._spilled_images = {}  # path -> temp file path
         self._spilled_history = {} # path -> temp file path
-        
+
         self.original_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self)
         self.edited_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self)
-        
+
         self.history = {}
         self.history_indices = {}
 
@@ -44,14 +43,16 @@ class WorkspaceManager:
             orig_img = self.original_images.pop(path)
             temp_orig = os.path.join(self._temp_dir, f"{hash(path)}_orig.png")
             cv2.imwrite(temp_orig, orig_img)
-            self._spilled_images[path] = temp_orig
-            
+            self._spilled_images[path] = {'orig': temp_orig}
+
         if path in self.edited_images:
             edit_img = self.edited_images.pop(path)
             temp_edit = os.path.join(self._temp_dir, f"{hash(path)}_edit.png")
             cv2.imwrite(temp_edit, edit_img)
-            self._spilled_images[path] = temp_edit
-            
+            if path not in self._spilled_images:
+                self._spilled_images[path] = {}
+            self._spilled_images[path]['edit'] = temp_edit
+
         if path in self.history:
             hist_data = self.history.pop(path)
             hist_idx = self.history_indices.pop(path, -1)
@@ -63,10 +64,12 @@ class WorkspaceManager:
     def restore_from_disk(self, path):
         """Reloads evicted pages back into RAM when the user navigates back."""
         if path not in self.original_images and path in self._spilled_images:
-            # In a real implementation, you'd use your utf8 imread helper here
-            self.original_images[path] = cv2.imread(self._spilled_images[path])
-            self.edited_images[path] = cv2.imread(self._spilled_images[path])
-            
+            paths = self._spilled_images.get(path, {})
+            if 'orig' in paths:
+                self.original_images[path] = cv2.imread(paths['orig'])
+            if 'edit' in paths:
+                self.edited_images[path] = cv2.imread(paths['edit'])
+
         if path not in self.history and path in self._spilled_history:
             with open(self._spilled_history[path], 'rb') as f:
                 data = pickle.load(f)
@@ -86,7 +89,7 @@ class WorkspaceManager:
         self.edited_images.clear()
         self.history.clear()
         self.history_indices.clear()
-        
+
         # Clean up disk spill
         for f in os.listdir(self._temp_dir):
             os.remove(os.path.join(self._temp_dir, f))
