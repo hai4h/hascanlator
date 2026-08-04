@@ -44,6 +44,8 @@ class BoundingBoxItem(QGraphicsPolygonItem):
         self.text_layout = None
         self.auto_fit_target_ratio = 0.8
         self.is_typeset = False
+        self.stroke_pixmap = None
+        self.stroke_offset = QPointF(0, 0)
         self.is_bubble = True
         self.bg_is_noisy = False
         self.align = Qt.AlignCenter
@@ -137,6 +139,54 @@ class BoundingBoxItem(QGraphicsPolygonItem):
         font.setStrikeOut(self.is_strikeout)
 
         self.text_layout = self._create_layout_for_polygon(self.translated_text, self.polygon(), font)
+
+        if self.stroke_width > 0 and self.is_typeset and self.translated_text.strip():
+            import cv2
+            import numpy as np
+            from PySide6.QtGui import QImage, QPainter, QPixmap
+
+            pad = self.stroke_width + 4
+            rect = self.polygon().boundingRect()
+            tw, th = max(1, int(rect.width())), max(1, int(rect.height()))
+
+            qimg = QImage(tw + pad*2, th + pad*2, QImage.Format_RGBA8888)
+            qimg.fill(Qt.transparent)
+
+            painter = QPainter(qimg)
+            painter.setRenderHint(QPainter.TextAntialiasing, True)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+
+            # Offset the painter so the text layout draws perfectly inside our padded QImage
+            painter.translate(-rect.left() + pad, -rect.top() + pad)
+            painter.setPen(QPen(Qt.black))
+            self.text_layout.draw(painter, QPointF(0, 0))
+            painter.end()
+
+            # Extract alpha channel
+            arr = np.frombuffer(qimg.bits(), dtype=np.uint8).reshape((th + pad*2, tw + pad*2, 4)).copy()
+            alpha = arr[:, :, 3]
+
+            # Dilate the alpha to create a smooth, rounded stroke
+            k_size = self.stroke_width * 2 + 1
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+            dilated_alpha = cv2.dilate(alpha, kernel)
+
+            # Light anti-aliasing on the hard edge
+            dilated_alpha = cv2.GaussianBlur(dilated_alpha, (3, 3), 0)
+
+            stroke_rgba = np.zeros((th + pad*2, tw + pad*2, 4), dtype=np.uint8)
+            r_c, g_c, b_c, _ = self.stroke_color.getRgb()
+            stroke_rgba[:, :, 0] = r_c
+            stroke_rgba[:, :, 1] = g_c
+            stroke_rgba[:, :, 2] = b_c
+            stroke_rgba[:, :, 3] = dilated_alpha
+
+            out_qimg = QImage(stroke_rgba.data, tw + pad*2, th + pad*2, (tw + pad*2)*4, QImage.Format_RGBA8888)
+            self.stroke_pixmap = QPixmap.fromImage(out_qimg.copy())
+            self.stroke_offset = QPointF(rect.left() - pad, rect.top() - pad)
+        else:
+            self.stroke_pixmap = None
+
         self.update()
 
     def _create_layout_for_polygon(self, text, polygon, font):
@@ -299,19 +349,9 @@ class BoundingBoxItem(QGraphicsPolygonItem):
 
         if self.is_typeset and self.text_layout:
             painter.save()
-            if self.stroke_width > 0:
-                path = QPainterPath()
-                for i in range(self.text_layout.lineCount()):
-                    line = self.text_layout.lineAt(i)
-                    text = self.translated_text[line.textStart() : line.textStart() + line.textLength()]
-                    font_metrics = QFontMetrics(self.text_layout.font())
-                    baseline = line.position() + QPointF(0, font_metrics.ascent())
-                    path.addText(baseline, self.text_layout.font(), text)
 
-                pen = QPen(self.stroke_color, self.stroke_width * 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-                painter.setPen(pen)
-                painter.setBrush(self.stroke_color)
-                painter.drawPath(path)
+            if self.stroke_width > 0 and getattr(self, 'stroke_pixmap', None) is not None:
+                painter.drawPixmap(self.stroke_offset, self.stroke_pixmap)
 
             painter.setPen(QPen(self.text_color))
             self.text_layout.draw(painter, QPointF(0, 0))
