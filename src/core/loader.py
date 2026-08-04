@@ -23,50 +23,72 @@ class ModelLoader(ABC):
 class MangaOcrLoader(ModelLoader):
     model_key = "manga_ocr"
     def load(self):
+        import torch
         from huggingface_hub import snapshot_download
         from manga_ocr import MangaOcr
         path = snapshot_download(repo_id="kha-white/manga-ocr-base", token=False, cache_dir=self._hf_cache_dir())
-        return MangaOcr(pretrained_model_name_or_path=path)
+        mocr = MangaOcr(pretrained_model_name_or_path=path)
+
+        # Ensure it uses GPU (CUDA/MPS) if available
+        device_str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+        device = torch.device(device_str)
+        if hasattr(mocr, 'device') and hasattr(mocr, 'model'):
+            mocr.device = device
+            mocr.model = mocr.model.to(device)
+
+        return mocr
 
 class YoloLoader(ModelLoader):
     model_key = "yolo_detector"
     def load(self):
+        import torch
         from ultralytics import YOLO
         from huggingface_hub import hf_hub_download
         path = hf_hub_download(repo_id="ogkalu/manga-text-detector-yolov8s", filename="manga-text-detector.pt", token=False, cache_dir=self._hf_cache_dir())
-        return YOLO(path)
+        model = YOLO(path)
+
+        # Explicitly push YOLO to the best available hardware
+        device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+        model.to(device)
+
+        return model
 
 class NmtLoader(ModelLoader):
     model_key = "nmt_translator"
     def load(self):
+        import torch
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
         from huggingface_hub import snapshot_download
+
+        device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         repo_id = self.nmt_repo_id
         path = snapshot_download(repo_id=repo_id, token=False, cache_dir=self._hf_cache_dir())
+
         tokenizer = AutoTokenizer.from_pretrained(path)
-        model = AutoModelForSeq2SeqLM.from_pretrained(path)
+        model = AutoModelForSeq2SeqLM.from_pretrained(path).to(device)
 
         class NMTWrapper:
-            def __init__(self, tok, mod, repo):
+            def __init__(self, tok, mod, repo, dev):
                 self.tokenizer = tok
                 self.model = mod
                 self.repo = repo
+                self.device = dev
 
             def __call__(self, text, src_lang="ja", tgt_lang="en"):
                 if "nllb" in self.repo:
                     lang_map = {"auto": "jpn_Jpan", "ja": "jpn_Jpan", "en": "eng_Latn", "ko": "kor_Hang", "zh-CN": "zho_Hans", "vi": "vie_Latn", "es": "spa_Latn", "fr": "fra_Latn"}
                     self.tokenizer.src_lang = lang_map.get(src_lang, "jpn_Jpan")
-                    inputs = self.tokenizer(text, return_tensors="pt", padding=True)
+                    inputs = self.tokenizer(text, return_tensors="pt", padding=True).to(self.device)
                     target_code = lang_map.get(tgt_lang, "eng_Latn")
                     forced_bos_token_id = self.tokenizer.lang_code_to_id.get(target_code, self.tokenizer.convert_tokens_to_ids(target_code))
                     translated_tokens = self.model.generate(**inputs, forced_bos_token_id=forced_bos_token_id)
                 else:
-                    inputs = self.tokenizer(text, return_tensors="pt", padding=True)
+                    inputs = self.tokenizer(text, return_tensors="pt", padding=True).to(self.device)
                     translated_tokens = self.model.generate(**inputs)
                 res_text = self.tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
                 return [{"translation_text": res_text}]
-                
-        return NMTWrapper(tokenizer, model, repo_id)
+
+        return NMTWrapper(tokenizer, model, repo_id, device)
 
 class MaskingLoader(ModelLoader):
     model_key = "masking_model"
@@ -80,7 +102,13 @@ class MaskingLoader(ModelLoader):
             def __init__(self, path):
                 import time; time.sleep(0.1)
                 import onnxruntime as ort
-                self.session = ort.InferenceSession(path, providers=['CPUExecutionProvider'])
+
+                # Fetch available providers and prioritize GPU / Hardware Accelerators over CPU
+                available = ort.get_available_providers()
+                preferred = ['CUDAExecutionProvider', 'MIGraphXExecutionProvider', 'ROCMExecutionProvider', 'DmlExecutionProvider', 'CoreMLExecutionProvider', 'CPUExecutionProvider']
+                providers = [p for p in preferred if p in available]
+
+                self.session = ort.InferenceSession(path, providers=providers)
                 self.input_name = self.session.get_inputs()[0].name
 
             def __call__(self, img_rgb):
@@ -116,7 +144,13 @@ class InpaintLoader(ModelLoader):
             def __init__(self, path):
                 import time; time.sleep(0.1)
                 import onnxruntime as ort
-                self.session = ort.InferenceSession(path, providers=['CPUExecutionProvider'])
+
+                # Fetch available providers and prioritize GPU / Hardware Accelerators over CPU
+                available = ort.get_available_providers()
+                preferred = ['CUDAExecutionProvider', 'MIGraphXExecutionProvider', 'ROCMExecutionProvider', 'DmlExecutionProvider', 'CoreMLExecutionProvider', 'CPUExecutionProvider']
+                providers = [p for p in preferred if p in available]
+
+                self.session = ort.InferenceSession(path, providers=providers)
 
             def __call__(self, img_512_rgb, mask_512):
                 import numpy as np
@@ -177,10 +211,10 @@ class ModelLoaderWorker(QThread):
             loader_cls = ModelLoader.registry.get(self.model_name)
             if not loader_cls:
                 raise ValueError(f"Unknown model: {self.model_name}")
-                
+
             loader = loader_cls(nmt_repo_id=self.nmt_repo_id)
             model = loader.load()
             self.process_finished.emit(model, self.model_name)
-            
+
         except Exception as e:
             self.error.emit(self.model_name, str(e))
