@@ -15,3 +15,4 @@ models/
 .venv314/
 uv.lock
 .python-version
+.venv_gpu/
