@@ -4,6 +4,9 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QGraphicsPixmapItem
 
+# Keywords that indicate an operation actually modified image pixels
+PIXEL_CHANGING_OPS = ["Inpaint", "Generate Mask", "Auto Pipeline"]
+
 class HistoryMixin:
     def get_current_boxes_state(self):
         return [BoxState.from_item(item) for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
@@ -16,7 +19,6 @@ class HistoryMixin:
     def commit_history(self, desc, aggregate=False):
         path = self.workspace.current_image_path
         if not path: return
-        img = self.workspace.edited_images[path].copy()
         boxes = self.get_current_boxes_state()
 
         if path not in self.workspace.history:
@@ -30,10 +32,13 @@ class HistoryMixin:
         if aggregate and curr_idx >= 0:
             if self.workspace.history[path][curr_idx]['desc'] == desc:
                 self.workspace.history[path][curr_idx]['boxes'] = boxes
-                self.workspace.history[path][curr_idx]['image'] = img
                 self._refresh_history_ui()
                 self.update_button_states()
                 return
+
+        # MEMORY OPTIMIZATION: Only copy the image if pixels actually changed
+        is_pixel_change = any(op in desc for op in PIXEL_CHANGING_OPS)
+        img = self.workspace.edited_images[path].copy() if is_pixel_change else None
 
         self.workspace.history[path].append({'desc': desc, 'image': img, 'boxes': boxes})
         self.workspace.history_indices[path] = len(self.workspace.history[path]) - 1
@@ -66,7 +71,23 @@ class HistoryMixin:
 
         self.set_processing_lock(True)
         step = history_list[index]
-        self.workspace.edited_images[path] = step['image'].copy()
+
+        # MEMORY OPTIMIZATION: If this step didn't change pixels, find the most recent image state
+        if step['image'] is None:
+            search_idx = index
+            while search_idx > 0 and history_list[search_idx]['image'] is None:
+                search_idx -= 1
+
+            img_to_use = history_list[search_idx]['image']
+            if img_to_use is not None:
+                self.workspace.edited_images[path] = img_to_use.copy()
+            elif path in self.workspace.original_images:
+                # EDGE CASE FIX: If we hit the "Initial State" (index 0) and it has no stored image,
+                # fall back to the pristine original image cache.
+                self.workspace.edited_images[path] = self.workspace.original_images[path].copy()
+        else:
+            self.workspace.edited_images[path] = step['image'].copy()
+
         self.workspace.history_indices[path] = index
 
         self.scene.clear()
@@ -75,7 +96,7 @@ class HistoryMixin:
         self.scene.addItem(self.current_image_item)
         self.scene.setSceneRect(QRectF(pixmap.rect()))
 
-        # Restore using BoxState (Eliminates 40 lines of dict mapping)
+        # Restore using BoxState
         for state in step['boxes']:
             box = BoundingBoxItem(state.polygon, is_auto=state.is_auto, shape_type=state.shape_type)
             state.apply_to(box)

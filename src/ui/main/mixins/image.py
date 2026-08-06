@@ -29,9 +29,14 @@ class ImageOperationsMixin:
     def cv2_to_qpixmap(self, cv_img):
         """Converts an OpenCV BGR numpy array to QPixmap for rendering."""
         h, w, ch = cv_img.shape
+        # Ensure the array is contiguous to avoid QImage issues
+        if not cv_img.flags['C_CONTIGUOUS']:
+            cv_img = np.ascontiguousarray(cv_img)
+
         bytes_per_line = ch * w
-        converted = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-        qimg = QImage(converted.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        # Use Format_BGR888 to skip cv2.cvtColor entirely!
+        # We still call .copy() so the QPixmap owns the underlying memory buffer.
+        qimg = QImage(cv_img.data, w, h, bytes_per_line, QImage.Format_BGR888).copy()
         return QPixmap.fromImage(qimg)
 
     #  PEEK AND UNDO LOGIC

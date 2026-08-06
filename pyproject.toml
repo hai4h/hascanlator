@@ -1,12 +1,16 @@
 [project]
 name = "hascanlator"
 version = "0.1.0"
-description = "Add your description here"
+description = "simple manga scanlator app using Python"
 readme = "README.md"
+authors = [
+    { name = "hai4h", email = "hoangdinhhaianh@gmail.com" }
+]
 requires-python = ">=3.14"
 dependencies = [
     "deep-translator>=1.11.4",
     "huggingface-hub>=1.26.0",
+    "jurigged>=0.6.1",
     "manga-ocr>=0.1.16",
     "onnxruntime>=1.28.0",
     "pillow>=12.2.0",
@@ -16,6 +20,7 @@ dependencies = [
     "sacremoses>=0.1.1",
     "sentencepiece>=0.2.2",
     "shapely>=2.1.2",
+    "torch>=2.13.0",
     "torchsummary>=1.5.1",
     "torchvision>=0.28.0",
     "ultralytics>=8.4.115",
@@ -29,5 +34,5 @@ hascanlator = "hascanlator:main"
 url = "https://download.pytorch.org/whl/cpu"
 
 [build-system]
-requires = ["uv_build>=0.12.1,<0.13.0"]
+requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"

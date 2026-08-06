@@ -19,7 +19,6 @@ class ShortcutsMixin:
             ("keybind_run_ocr", self.run_ocr_on_selected),
             ("keybind_translate_box", self.run_translation_on_selected),
             ("keybind_trans_type_sel", self.run_translate_typeset_selected),
-            ("keybind_trans_type_all", self.run_translate_typeset_all),
             ("keybind_generate_mask", self.generate_bubble_mask),
             ("keybind_inpaint_bubble", self.inpaint_bubble_mask),
             ("keybind_toggle_typeset", self.toggle_typeset_view),

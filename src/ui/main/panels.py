@@ -42,7 +42,6 @@ class EditorDockWidget(QDockWidget):
         self.btn_delete_box = QPushButton("Delete Box")
 
         self.btn_trans_type_sel = QPushButton("Translate && Typeset Selected")
-        self.btn_trans_type_all = QPushButton("Translate && Typeset All Boxes")
 
         tools_layout.addWidget(self.btn_run_ocr)
         tools_layout.addWidget(self.btn_translate_box)
@@ -51,14 +50,12 @@ class EditorDockWidget(QDockWidget):
         self.btn_run_ocr.setEnabled(False)
         self.btn_translate_box.setEnabled(False)
         self.btn_trans_type_sel.setEnabled(False)
-        self.btn_trans_type_all.setEnabled(False)
         self.btn_delete_box.setEnabled(False)
         self.ocr_input.setEnabled(False)
         self.trans_input.setEnabled(False)
 
         layout.addLayout(tools_layout)
         layout.addWidget(self.btn_trans_type_sel)
-        layout.addWidget(self.btn_trans_type_all)
         layout.addWidget(QLabel("Original (OCR):"))
         layout.addWidget(self.ocr_input)
         layout.addWidget(QLabel("Translation:"))

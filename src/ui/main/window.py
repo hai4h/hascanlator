@@ -33,6 +33,7 @@ class HAScanlatorWindow(
     def __init__(self):
         super().__init__()
         WorkerProcessingMixin.__init__(self) # Initialize worker tracking list
+        RenderingMixin.__init__(self)
         self.setWindowTitle("HAScanlator")
 
         screen_geom = self.screen().availableGeometry()
@@ -89,7 +90,7 @@ class HAScanlatorWindow(
             "default_font_size": 16, "default_font_bold": False, "default_font_italic": False,
             "default_font_underline": False, "default_font_strikeout": False, "default_align": "center",
             "default_indent": 5, "default_text_color": "black", "default_stroke_width": 0,
-            "default_stroke_color": "white", "auto_stroke_size": 4, 
+            "default_stroke_color": "white", "auto_stroke_size": 4,
             "auto_style_enabled": True, "auto_style_color": True, "auto_style_stroke": True,
             "typeset_toolbar_pos": "right",
             "ocr_allow_edit": False, "format_ellipsis_standard": True, "format_ellipsis_newline": True,
@@ -197,7 +198,6 @@ class HAScanlatorWindow(
         self.right_dock.trans_input.textChanged.connect(self.on_trans_text_edited)
         self.right_dock.btn_translate_box.clicked.connect(self.run_translation_on_selected)
         self.right_dock.btn_trans_type_sel.clicked.connect(self.run_translate_typeset_selected)
-        self.right_dock.btn_trans_type_all.clicked.connect(self.run_translate_typeset_all)
         self.history_dock.history_list.itemClicked.connect(self.on_history_item_clicked)
 
         self.typeset_toolbar.btn_mask_bubble.clicked.connect(self.generate_bubble_mask)
@@ -315,7 +315,6 @@ class HAScanlatorWindow(
         self.right_dock.btn_run_ocr.setEnabled(not self.is_processing and has_image and has_any_box)
         self.right_dock.btn_translate_box.setEnabled(not self.is_processing and has_image and has_any_box)
         self.right_dock.btn_trans_type_sel.setEnabled(not self.is_processing and has_image and has_any_box)
-        self.right_dock.btn_trans_type_all.setEnabled(not self.is_processing and has_image)
         self.right_dock.btn_delete_box.setEnabled(has_any_box)
         self.typeset_toolbar.setEnabled(not self.is_processing)
         self.nav.btn_prev.setEnabled(not self.is_processing and self.workspace.current_img_index > 0)

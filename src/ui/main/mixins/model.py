@@ -9,8 +9,6 @@ class ModelProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Model Manager")
 
-        self.setMinimumWidth(500)
-
         self.setWindowFlags(Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint | Qt.WindowStaysOnTopHint)
         self.setWindowModality(Qt.ApplicationModal)
 
@@ -21,6 +19,8 @@ class ModelProgressDialog(QDialog):
         self.lbl_status.setTextFormat(Qt.RichText)
         self.lbl_status.setWordWrap(True)
         self.lbl_status.setAlignment(Qt.AlignCenter)
+        self.lbl_status.setMinimumWidth(450)
+
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
 
@@ -46,7 +46,7 @@ class ModelManagementMixin:
         try:
             cache_dir = os.path.abspath(os.path.join(os.getcwd(), "models", "hf_cache"))
             if not os.path.exists(cache_dir): return False
-            
+
             hf_cache_info = scan_cache_dir(cache_dir)
             for repo in hf_cache_info.repos:
                 if repo.repo_id == repo_id: return True

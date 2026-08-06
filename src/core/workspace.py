@@ -6,11 +6,12 @@ from collections import OrderedDict
 from src.core.constants import AppCacheConfig
 
 class BoundedImageCache(OrderedDict):
-    def __init__(self, max_entries, spill_dir, workspace_ref):
+    def __init__(self, max_entries, spill_dir, workspace_ref, cache_type):
         super().__init__()
         self.max_entries = max_entries
         self.spill_dir = spill_dir
         self.workspace_ref = workspace_ref
+        self.cache_type = cache_type # 'orig' or 'edit'
 
     def __setitem__(self, key, value):
         if key in self:
@@ -18,8 +19,10 @@ class BoundedImageCache(OrderedDict):
         super().__setitem__(key, value)
 
         while len(self) > self.max_entries:
-            evicted_key, _ = self.popitem(last=False)
-            self.workspace_ref._spill_to_disk(evicted_key)
+            evicted_key, evicted_val = self.popitem(last=False)
+            # Pass the evicted value directly so we don't try to pop it again
+            self.workspace_ref._spill_to_disk(evicted_key, evicted_val, self.cache_type)
+
 
 class WorkspaceManager:
     def __init__(self):
@@ -28,32 +31,27 @@ class WorkspaceManager:
         self.page_data_cache = {}
 
         self._temp_dir = tempfile.mkdtemp(prefix="hascanlator_")
-        self._spilled_images = {}  # path -> temp file path
+        self._spilled_images = {}  # path -> {'orig': path, 'edit': path}
         self._spilled_history = {} # path -> temp file path
 
-        self.original_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self)
-        self.edited_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self)
+        self.original_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self, "orig")
+        self.edited_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self, "edit")
 
         self.history = {}
         self.history_indices = {}
 
-    def _spill_to_disk(self, path):
-        """Saves evicted images and history to disk to free RAM."""
-        if path in self.original_images:
-            orig_img = self.original_images.pop(path)
-            temp_orig = os.path.join(self._temp_dir, f"{hash(path)}_orig.png")
-            cv2.imwrite(temp_orig, orig_img)
-            self._spilled_images[path] = {'orig': temp_orig}
+    def _spill_to_disk(self, path, img_to_spill, cache_type):
+        """Saves evicted images to disk to free RAM."""
+        temp_path = os.path.join(self._temp_dir, f"{hash(path)}_{cache_type}.png")
+        # Use fast PNG compression
+        cv2.imwrite(temp_path, img_to_spill, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        
+        if path not in self._spilled_images:
+            self._spilled_images[path] = {}
+        self._spilled_images[path][cache_type] = temp_path
 
-        if path in self.edited_images:
-            edit_img = self.edited_images.pop(path)
-            temp_edit = os.path.join(self._temp_dir, f"{hash(path)}_edit.png")
-            cv2.imwrite(temp_edit, edit_img)
-            if path not in self._spilled_images:
-                self._spilled_images[path] = {}
-            self._spilled_images[path]['edit'] = temp_edit
-
-        if path in self.history:
+        # Spill history if it exists for this path (only needs to happen once)
+        if cache_type == "edit" and path in self.history:
             hist_data = self.history.pop(path)
             hist_idx = self.history_indices.pop(path, -1)
             temp_hist = os.path.join(self._temp_dir, f"{hash(path)}_hist.pkl")
@@ -65,16 +63,27 @@ class WorkspaceManager:
         """Reloads evicted pages back into RAM when the user navigates back."""
         if path not in self.original_images and path in self._spilled_images:
             paths = self._spilled_images.get(path, {})
-            if 'orig' in paths:
+            if 'orig' in paths and os.path.exists(paths['orig']):
                 self.original_images[path] = cv2.imread(paths['orig'])
-            if 'edit' in paths:
+                os.remove(paths['orig'])
+                
+            if 'edit' in paths and os.path.exists(paths['edit']):
                 self.edited_images[path] = cv2.imread(paths['edit'])
+                os.remove(paths['edit'])
+
+            # Cleanup tracking dict if both are restored
+            if 'orig' not in paths and 'edit' not in paths:
+                del self._spilled_images[path]
 
         if path not in self.history and path in self._spilled_history:
-            with open(self._spilled_history[path], 'rb') as f:
-                data = pickle.load(f)
-            self.history[path] = data['history']
-            self.history_indices[path] = data['index']
+            hist_file = self._spilled_history[path]
+            if os.path.exists(hist_file):
+                with open(hist_file, 'rb') as f:
+                    data = pickle.load(f)
+                self.history[path] = data['history']
+                self.history_indices[path] = data['index']
+                os.remove(hist_file)
+            del self._spilled_history[path]
 
     def load_images(self, file_paths):
         self.image_paths = sorted(file_paths)

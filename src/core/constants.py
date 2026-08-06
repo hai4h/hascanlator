@@ -26,5 +26,5 @@ class MaskConfig:
     DARK_BG_DILATE_ITERATIONS = 2
 
 class AppCacheConfig:
-    MAX_IMAGES_IN_RAM = 8
-    MAX_HISTORY_IN_RAM = 10
+    MAX_IMAGES_IN_RAM = 20
+    MAX_HISTORY_IN_RAM = 20

@@ -26,7 +26,7 @@ class WorkerProcessingMixin:
         self.progress_bar.setVisible(False)
         self.set_processing_lock(False)
         self.update_window_title()
-        
+
     def _get_translation_requirements(self, boxes):
         reqs = []
         engine = self.settings.value("translation_engine", "google")
@@ -59,7 +59,7 @@ class WorkerProcessingMixin:
                 r = box.sceneBoundingRect()
                 boxes_data.append(((int(r.x()), int(r.y()), int(r.width()), int(r.height())), box))
 
-            self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
+            self.ocr_worker = self._register_worker(BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data))
             self.ocr_worker.progress.connect(self.on_ocr_progress)
             self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
             self.ocr_worker.process_finished.connect(self.on_batch_ocr_finished)
@@ -227,7 +227,7 @@ class WorkerProcessingMixin:
             crop_rect = (int(r.x()), int(r.y()), int(r.width()), int(r.height()))
             boxes_data.append((crop_rect, box))
 
-        self.ocr_worker = BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data)
+        self.ocr_worker = self._register_worker(BatchOCRWorker(self.mocr_model, self.workspace.current_image_path, boxes_data))
         self.ocr_worker.progress.connect(self.on_ocr_progress)
         self.ocr_worker.progress_percent.connect(self.progress_bar.setValue)
         self.ocr_worker.process_finished.connect(self.on_batch_ocr_finished)
@@ -340,44 +340,6 @@ class WorkerProcessingMixin:
         self._is_auto_scan_pipeline = True
         self._pipeline_flags = {'mask': True, 'inpaint': True, 'typeset': True, 'trans': True}
         self._active_pipeline_boxes = selected_boxes
-        self._start_translation_worker(engine, boxes_data)
-
-    def run_translate_typeset_all(self):
-        if not self.workspace.current_image_path:
-            return
-
-        all_boxes = [item for item in self.scene.items() if isinstance(item, BoundingBoxItem)]
-        if not all_boxes:
-            self.statusBar().showMessage("No boxes found on page.")
-            return
-
-        reqs = self._get_translation_requirements(all_boxes)
-        reqs.append(("masking_model", "local_masking"))
-        reqs.append(("inpaint_model", "local_inpaint"))
-        if reqs and not self.ensure_models_ready(reqs): return
-
-        if self._check_and_run_ocr_first(all_boxes, self.run_translate_typeset_all):
-            return
-
-        engine = self.settings.value("translation_engine", "google")
-
-        boxes_data = [(item.raw_text, item) for item in all_boxes if item.raw_text.strip()]
-
-        if not boxes_data:
-            self.statusBar().showMessage("No valid OCR text found on page to translate.")
-            return
-
-        self.set_processing_lock(True)
-        self.update_window_title("Translating & Typesetting All...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.statusBar().showMessage(f"Processing {len(boxes_data)} boxes on page...")
-
-        self._pending_history_msg = f"Translate & Typeset All ({len(boxes_data)} Boxes)"
-        self._is_auto_scan_pipeline = True
-        self._pipeline_flags = {'mask': True, 'inpaint': True, 'typeset': True, 'trans': True}
-        self._active_pipeline_boxes = [box for _, box in boxes_data]
         self._start_translation_worker(engine, boxes_data)
 
     def _start_translation_worker(self, engine, boxes_data):

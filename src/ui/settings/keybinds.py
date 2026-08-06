@@ -69,7 +69,6 @@ class KeybindsTab(QWidget):
         add_bind("Run OCR on Selected:", "keybind_run_ocr")
         add_bind("Translate Selected Box:", "keybind_translate_box")
         add_bind("Translate + Typeset Selected:", "keybind_trans_type_sel")
-        add_bind("Translate + Typeset All:", "keybind_trans_type_all")
         add_bind("Generate Text Mask:", "keybind_generate_mask")
         add_bind("Inpaint Mask:", "keybind_inpaint_bubble")
 
