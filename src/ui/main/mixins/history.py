@@ -1,5 +1,6 @@
 from src.core.box_state import BoxState
 from src.ui.canvas.items import BoundingBoxItem
+from src.core.constants import AppCacheConfig           # <<< NEW import
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QGraphicsPixmapItem
@@ -21,6 +22,8 @@ class HistoryMixin:
         if not path: return
         boxes = self.get_current_boxes_state()
 
+        current_sel_ids = tuple(sorted([id(item) for item in self.scene.selectedItems() if isinstance(item, BoundingBoxItem)]))
+
         if path not in self.workspace.history:
             self.workspace.history[path] = []
             self.workspace.history_indices[path] = -1
@@ -30,18 +33,35 @@ class HistoryMixin:
             self.workspace.history[path] = self.workspace.history[path][:curr_idx + 1]
 
         if aggregate and curr_idx >= 0:
-            if self.workspace.history[path][curr_idx]['desc'] == desc:
-                self.workspace.history[path][curr_idx]['boxes'] = boxes
+            last_step = self.workspace.history[path][curr_idx]
+            if last_step['desc'] == desc and last_step.get('sel_ids') == current_sel_ids:
+                last_step['boxes'] = boxes
                 self._refresh_history_ui()
                 self.update_button_states()
                 return
 
-        # MEMORY OPTIMIZATION: Only copy the image if pixels actually changed
         is_pixel_change = any(op in desc for op in PIXEL_CHANGING_OPS)
         img = self.workspace.edited_images[path].copy() if is_pixel_change else None
 
-        self.workspace.history[path].append({'desc': desc, 'image': img, 'boxes': boxes})
+        new_step = {
+            'desc': desc, 
+            'image': img, 
+            'boxes': boxes, 
+            'sel_ids': current_sel_ids
+        }
+        self.workspace.history[path].append(new_step)
         self.workspace.history_indices[path] = len(self.workspace.history[path]) - 1
+
+        max_hist = AppCacheConfig.MAX_HISTORY_IN_RAM
+        hist_list = self.workspace.history[path]
+        if len(hist_list) > max_hist:
+            overflow = len(hist_list) - max_hist
+            for i in range(overflow):
+                hist_list[i]['image'] = None
+                hist_list[i]['boxes'] = None
+            del hist_list[:overflow]
+            self.workspace.history_indices[path] = max(0, curr_idx - overflow + 1)
+
         self._refresh_history_ui()
         self.update_button_states()
 

@@ -189,7 +189,17 @@ class ModelManagementMixin:
         elif name == "inpaint_model":
             self.inpaint_model, self.inpaint_is_loading = model, False
 
-        if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
+        if thread_ref in self.loader_threads:
+            self.loader_threads.remove(thread_ref)
+        try:
+            thread_ref.process_finished.disconnect()
+            thread_ref.error.disconnect()
+            if hasattr(thread_ref, 'progress_percent'):
+                thread_ref.progress_percent.disconnect()
+        except RuntimeError:
+            pass  # already disconnected
+        thread_ref.wait(2000)
+        thread_ref.deleteLater()
 
         self.is_loading_model_seq = False
 
@@ -213,7 +223,17 @@ class ModelManagementMixin:
         elif name == "masking_model": self.masking_is_loading = False
         elif name == "inpaint_model": self.inpaint_is_loading = False
 
-        if thread_ref in self.loader_threads: self.loader_threads.remove(thread_ref)
+        if thread_ref in self.loader_threads:
+            self.loader_threads.remove(thread_ref)
+        try:
+            thread_ref.process_finished.disconnect()
+            thread_ref.error.disconnect()
+            if hasattr(thread_ref, 'progress_percent'):
+                thread_ref.progress_percent.disconnect()
+        except RuntimeError:
+            pass
+        thread_ref.wait(2000)
+        thread_ref.deleteLater()
 
         self.is_loading_model_seq = False
         self.update_window_title()

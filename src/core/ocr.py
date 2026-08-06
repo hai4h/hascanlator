@@ -2,8 +2,8 @@ from PIL import Image
 from PySide6.QtCore import QThread, Signal
 
 class BatchOCRWorker(QThread):
-    progress = Signal(str, object) 
-    progress_percent = Signal(int) 
+    progress = Signal(str, object)
+    progress_percent = Signal(int)
     process_finished = Signal()
     error = Signal(str)
 
@@ -14,6 +14,7 @@ class BatchOCRWorker(QThread):
         self.boxes_data = boxes_data
 
     def run(self):
+        img = None
         try:
             img = Image.open(self.image_path)
             total = len(self.boxes_data)
@@ -25,7 +26,13 @@ class BatchOCRWorker(QThread):
 
                 self.progress.emit(text, box_ref)
                 self.progress_percent.emit(int(((i + 1) / total) * 100))
-                
+
             self.process_finished.emit()
         except Exception as e:
             self.error.emit(str(e))
+        finally:
+            if img is not None:
+                try:
+                    img.close()
+                except Exception:
+                    pass

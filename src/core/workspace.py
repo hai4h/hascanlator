@@ -11,28 +11,48 @@ class BoundedImageCache(OrderedDict):
         self.max_entries = max_entries
         self.spill_dir = spill_dir
         self.workspace_ref = workspace_ref
-        self.cache_type = cache_type # 'orig' or 'edit'
+        self.cache_type = cache_type
 
     def __setitem__(self, key, value):
         if key in self:
             self.move_to_end(key)
         super().__setitem__(key, value)
-
         while len(self) > self.max_entries:
             evicted_key, evicted_val = self.popitem(last=False)
-            # Pass the evicted value directly so we don't try to pop it again
             self.workspace_ref._spill_to_disk(evicted_key, evicted_val, self.cache_type)
+
+
+class BoundedPageStateCache(OrderedDict):
+    """LRU-bounded cache for per-page BoxState lists.
+
+    BoxState objects carry numpy `generated_mask` arrays, so an unbounded
+    cache would steadily grow RAM as the user visits more pages. When
+    evicted, the entry is simply dropped — `save_current_page_state`
+    will rebuild it from the live scene the next time the page is opened
+    (the scene reloads boxes from history via `load_history_step`).
+    """
+    def __init__(self, max_entries):
+        super().__init__()
+        self.max_entries = max_entries
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self.max_entries:
+            self.popitem(last=False)
 
 
 class WorkspaceManager:
     def __init__(self):
         self.image_paths = []
         self.current_img_index = -1
-        self.page_data_cache = {}
+
+        self.page_data_cache = BoundedPageStateCache(AppCacheConfig.MAX_IMAGES_IN_RAM)
 
         self._temp_dir = tempfile.mkdtemp(prefix="hascanlator_")
-        self._spilled_images = {}  # path -> {'orig': path, 'edit': path}
-        self._spilled_history = {} # path -> temp file path
+        self._spilled_images = {}
+        self._spilled_history = {}
 
         self.original_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self, "orig")
         self.edited_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self, "edit")
@@ -45,7 +65,7 @@ class WorkspaceManager:
         temp_path = os.path.join(self._temp_dir, f"{hash(path)}_{cache_type}.png")
         # Use fast PNG compression
         cv2.imwrite(temp_path, img_to_spill, [cv2.IMWRITE_PNG_COMPRESSION, 1])
-        
+
         if path not in self._spilled_images:
             self._spilled_images[path] = {}
         self._spilled_images[path][cache_type] = temp_path
@@ -66,7 +86,7 @@ class WorkspaceManager:
             if 'orig' in paths and os.path.exists(paths['orig']):
                 self.original_images[path] = cv2.imread(paths['orig'])
                 os.remove(paths['orig'])
-                
+
             if 'edit' in paths and os.path.exists(paths['edit']):
                 self.edited_images[path] = cv2.imread(paths['edit'])
                 os.remove(paths['edit'])

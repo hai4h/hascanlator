@@ -36,6 +36,7 @@ class BoundingBoxItem(QGraphicsPolygonItem):
         self.handle_size = 12
         self.current_handle = self.NONE
         self.resizing_handle = self.NONE
+        self._prevent_move = False
 
         self.raw_text = ""
         self.translated_text = ""
@@ -496,8 +497,18 @@ class BoundingBoxItem(QGraphicsPolygonItem):
     def mousePressEvent(self, event):
         if self.current_handle != self.NONE and self.isSelected():
             self.resizing_handle = self.current_handle
+            self._initial_poly = QPolygonF(self.polygon()) # Track shape before resize
             event.accept()
-        else: super().mousePressEvent(event)
+        else:
+            was_selected = self.isSelected()
+            super().mousePressEvent(event)
+
+            # PATCH: If this click just selected the box, prevent it from moving
+            if not was_selected and self.isSelected():
+                self._prevent_move = True
+            else:
+                self._prevent_move = False
+                self._initial_pos = QPointF(self.pos()) # Track position before move
 
     def mouseMoveEvent(self, event):
         if self.resizing_handle != self.NONE:
@@ -518,10 +529,34 @@ class BoundingBoxItem(QGraphicsPolygonItem):
             if self.is_typeset:
                 self.update_typeset()
             event.accept()
-        else: super().mouseMoveEvent(event)
+        elif self._prevent_move:
+            # PATCH: Swallow move events if the box was just selected by this initial click
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if self.resizing_handle != self.NONE:
             self.resizing_handle = self.NONE
+            # PATCH: If shape actually changed during resize, log to history
+            if self._initial_poly is not None and self.polygon() != self._initial_poly:
+                self._commit_change("Resize Shape")
+            self._initial_poly = None
             event.accept()
-        else: super().mouseReleaseEvent(event)
+        else:
+            was_prevented = self._prevent_move
+            self._prevent_move = False
+            super().mouseReleaseEvent(event)
+            # PATCH: If position actually changed during move, log to history
+            if not was_prevented and self._initial_pos is not None and self.pos() != self._initial_pos:
+                self._commit_change("Move Box")
+            self._initial_pos = None
+
+    def _commit_change(self, desc):
+        """Safely calls commit_history on the main window by traversing the scene's views."""
+        if self.scene():
+            for view in self.scene().views():
+                window = view.window()
+                if hasattr(window, 'commit_history'):
+                    window.commit_history(desc, aggregate=True)
+                    break
