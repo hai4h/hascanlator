@@ -1,8 +1,10 @@
-from dataclasses import dataclass, field
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPolygonF
+from dataclasses import dataclass
+
 import cv2
 import numpy as np
+from PySide6.QtCore import QPointF, Qt
+from PySide6.QtGui import QColor, QPolygonF
+
 
 @dataclass
 class BoxState:
@@ -29,7 +31,7 @@ class BoxState:
     text_color: str = "black"
     stroke_width: int = 0
     stroke_color: str = "white"
-    generated_mask: bytes | None = None  # Stored as compressed PNG bytes
+    generated_mask: np.ndarray | None = None
     auto_fit_target_ratio: float = 0.8
 
     def __getstate__(self):
@@ -37,55 +39,55 @@ class BoxState:
         state = self.__dict__.copy()
 
         # 1. Convert QPolygonF to list of (x, y) tuples
-        if state.get('polygon') is not None:
-            poly = state['polygon']
-            state['polygon'] = [(poly[i].x(), poly[i].y()) for i in range(poly.count())]
+        if state.get("polygon") is not None:
+            poly = state["polygon"]
+            state["polygon"] = [(poly[i].x(), poly[i].y()) for i in range(poly.count())]
 
         # 2. Convert QPointF to (x, y) tuple
-        if state.get('pos') is not None:
-            state['pos'] = (state['pos'].x(), state['pos'].y())
+        if state.get("pos") is not None:
+            state["pos"] = (state["pos"].x(), state["pos"].y())
 
         # 3. Convert Qt.AlignmentFlag to int
-        if state.get('align') is not None:
-            state['align'] = int(state['align'])
-        if state.get('valign') is not None:
-            state['valign'] = int(state['valign'])
+        if state.get("align") is not None:
+            state["align"] = int(state["align"])
+        if state.get("valign") is not None:
+            state["valign"] = int(state["valign"])
 
         # 4. Only encode mask to PNG when pickling to disk
-        if state.get('generated_mask') is not None:
-            _, buf = cv2.imencode('.png', state['generated_mask'])
-            state['generated_mask'] = buf.tobytes()
+        if state.get("generated_mask") is not None:
+            _, buf = cv2.imencode(".png", state["generated_mask"])
+            state["generated_mask"] = buf.tobytes()
 
         return state
 
     def __setstate__(self, state):
         """Rebuild PySide6 objects and numpy arrays when loading from disk."""
         # 1. Rebuild QPolygonF
-        if state.get('polygon') is not None:
+        if state.get("polygon") is not None:
             poly = QPolygonF()
-            for x, y in state['polygon']:
+            for x, y in state["polygon"]:
                 poly.append(QPointF(x, y))
-            state['polygon'] = poly
+            state["polygon"] = poly
 
         # 2. Rebuild QPointF
-        if state.get('pos') is not None:
-            state['pos'] = QPointF(state['pos'][0], state['pos'][1])
+        if state.get("pos") is not None:
+            state["pos"] = QPointF(state["pos"][0], state["pos"][1])
 
         # 3. Rebuild Qt.AlignmentFlag
-        if state.get('align') is not None:
-            state['align'] = Qt.AlignmentFlag(state['align'])
-        if state.get('valign') is not None:
-            state['valign'] = Qt.AlignmentFlag(state['valign'])
+        if state.get("align") is not None:
+            state["align"] = Qt.AlignmentFlag(state["align"])
+        if state.get("valign") is not None:
+            state["valign"] = Qt.AlignmentFlag(state["valign"])
 
         # 4. Decode mask from PNG bytes back to numpy array
-        if state.get('generated_mask') is not None:
-            arr = np.frombuffer(state['generated_mask'], dtype=np.uint8)
-            state['generated_mask'] = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
+        if state.get("generated_mask") is not None:
+            arr = np.frombuffer(state["generated_mask"], dtype=np.uint8)
+            state["generated_mask"] = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
 
         self.__dict__.update(state)
 
     @classmethod
-    def from_item(cls, item: "BoundingBoxItem") -> "BoxState":
+    def from_item(cls, item: BoundingBoxItem) -> BoxState:
         return cls(
             polygon=item.polygon(),
             pos=item.scenePos(),
@@ -96,7 +98,7 @@ class BoxState:
             is_typeset=item.is_typeset,
             is_bubble=item.is_bubble,
             bg_is_noisy=item.bg_is_noisy,
-            bg_is_solid=getattr(item, 'bg_is_solid', False),
+            bg_is_solid=getattr(item, "bg_is_solid", False),
             align=item.align,
             valign=item.valign,
             indent=item.indent,
@@ -111,10 +113,10 @@ class BoxState:
             stroke_color=item.stroke_color.name(),
             stroke_width=item.stroke_width,
             generated_mask=item.generated_mask,  # Store raw numpy array in RAM!
-            auto_fit_target_ratio=item.auto_fit_target_ratio
+            auto_fit_target_ratio=item.auto_fit_target_ratio,
         )
 
-    def apply_to(self, item: "BoundingBoxItem"):
+    def apply_to(self, item: BoundingBoxItem):
         item.setPos(self.pos)
         item.raw_text = self.raw_text
         item.translated_text = self.translated_text

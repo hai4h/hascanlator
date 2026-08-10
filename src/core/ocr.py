@@ -1,6 +1,7 @@
 from PIL import Image
 from PySide6.QtCore import QThread, Signal
 
+
 class BatchOCRWorker(QThread):
     progress = Signal(str, object)
     progress_percent = Signal(int)

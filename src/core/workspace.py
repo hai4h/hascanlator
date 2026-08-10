@@ -1,9 +1,12 @@
 import os
-import tempfile
-import cv2
 import pickle
+import tempfile
 from collections import OrderedDict
+
+import cv2
+
 from src.core.constants import AppCacheConfig
+
 
 class BoundedImageCache(OrderedDict):
     def __init__(self, max_entries, spill_dir, workspace_ref, cache_type):
