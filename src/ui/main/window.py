@@ -279,6 +279,12 @@ class HAScanlatorWindow(
         self._orphaned_workers.clear()
 
         # Free models explicitly
+        inp = getattr(self, "inpaint_model", None)
+        if inp is not None:
+            try:
+                inp.close()
+            except Exception:
+                pass
         for key in ("mocr_model", "yolo_model", "nmt_model", "masking_model", "inpaint_model"):
             setattr(self, key, None)
         import gc; gc.collect()

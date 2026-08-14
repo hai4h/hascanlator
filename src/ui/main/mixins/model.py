@@ -260,6 +260,11 @@ class ModelManagementMixin:
         elif name == "masking_model":
             self.masking_model, self.masking_is_loading = model, False
         elif name == "inpaint_model":
+            if self.inpaint_model is not None and self.inpaint_model is not model:
+                try:
+                    self.inpaint_model.close()
+                except Exception:
+                    pass
             self.inpaint_model, self.inpaint_is_loading = model, False
 
         if thread_ref in self.loader_threads:
@@ -340,6 +345,11 @@ class ModelManagementMixin:
         elif model_name == "masking_model":
             self.masking_model = None
         elif model_name == "inpaint_model":
+            if self.inpaint_model is not None:
+                try:
+                    self.inpaint_model.close()
+                except Exception:
+                    pass
             self.inpaint_model = None
 
         gc.collect()
