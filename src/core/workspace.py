@@ -23,6 +23,29 @@ class BoundedImageCache(OrderedDict):
         while len(self) > self.max_entries:
             evicted_key, evicted_val = self.popitem(last=False)
             self.workspace_ref._spill_to_disk(evicted_key, evicted_val, self.cache_type)
+            self.workspace_ref.pixmap_cache.pop((evicted_key, "orig"), None)
+            self.workspace_ref.pixmap_cache.pop((evicted_key, "edit"), None)
+        # The image for this key was replaced: drop its stale rendered pixmap
+        self.workspace_ref.pixmap_cache.pop((key, self.cache_type), None)
+
+
+class BoundedPixmapCache(OrderedDict):
+    """LRU-bounded cache of rendered QPixmaps, keyed by (path, kind).
+
+    Only holds a handful of entries (see AppCacheConfig.MAX_PIXMAPS_IN_RAM):
+    one page at 2500x3500 costs ~35 MB as a pixmap, so caching all pages
+    would be worse than the conversion cost it saves.
+    """
+    def __init__(self, max_entries):
+        super().__init__()
+        self.max_entries = max_entries
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self.max_entries:
+            self.popitem(last=False)
 
 
 class BoundedPageStateCache(OrderedDict):
@@ -57,6 +80,7 @@ class WorkspaceManager:
         self._spilled_images = {}
         self._spilled_history = {}
 
+        self.pixmap_cache = BoundedPixmapCache(AppCacheConfig.MAX_PIXMAPS_IN_RAM)
         self.original_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self, "orig")
         self.edited_images = BoundedImageCache(AppCacheConfig.MAX_IMAGES_IN_RAM, self._temp_dir, self, "edit")
 
@@ -121,6 +145,7 @@ class WorkspaceManager:
         self.edited_images.clear()
         self.history.clear()
         self.history_indices.clear()
+        self.pixmap_cache.clear()
 
         # Clean up disk spill
         for f in os.listdir(self._temp_dir):

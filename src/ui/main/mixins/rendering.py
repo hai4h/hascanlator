@@ -71,7 +71,7 @@ class RenderingMixin:
             self.workspace.history[path] = []
             self.workspace.history_indices[path] = -1
 
-        pixmap = self.cv2_to_qpixmap(self.workspace.edited_images[path])
+        pixmap = self.get_page_pixmap(path, self.workspace.edited_images[path])
         self.current_image_item = QGraphicsPixmapItem(pixmap)
         self.scene.addItem(self.current_image_item)
         self.scene.setSceneRect(QRectF(pixmap.rect()))

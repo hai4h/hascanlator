@@ -117,6 +117,7 @@ class MaskingLoader(ModelLoader):
 
                 self.session = ort.InferenceSession(path, providers=providers)
                 self.input_name = self.session.get_inputs()[0].name
+                self.providers = self.session.get_providers()
 
             def __call__(self, img_rgb):
                 import cv2, numpy as np
@@ -154,6 +155,7 @@ class InpaintLoader(ModelLoader):
                 # Session creation happens in a child process so the UI never
                 # freezes (InferenceSession holds the GIL for its full duration).
                 self._proxy = OnnxModelProxy(path)
+                self.providers = self._proxy.providers
 
             def __call__(self, img_512_rgb, mask_512):
                 import numpy as np

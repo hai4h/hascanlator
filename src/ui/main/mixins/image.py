@@ -39,11 +39,20 @@ class ImageOperationsMixin:
         qimg = QImage(cv_img.data, w, h, bytes_per_line, QImage.Format_BGR888).copy()
         return QPixmap.fromImage(qimg)
 
+    def get_page_pixmap(self, path, cv_img, kind="edit"):
+        """Cached page pixmap. kind is 'orig' or 'edit' (peek vs edited view)."""
+        key = (path, kind)
+        pixmap = self.workspace.pixmap_cache.get(key)
+        if pixmap is None:
+            pixmap = self.cv2_to_qpixmap(cv_img)
+            self.workspace.pixmap_cache[key] = pixmap
+        return pixmap
+
     #  PEEK AND UNDO LOGIC
     def show_original_image(self):
         path = self.workspace.current_image_path
         if path and path in self.workspace.original_images:
-            self.current_image_item.setPixmap(self.cv2_to_qpixmap(self.workspace.original_images[path]))
+            self.current_image_item.setPixmap(self.get_page_pixmap(path, self.workspace.original_images[path], "orig"))
             for item in self.scene.items():
                 if isinstance(item, BoundingBoxItem):
                     item.setVisible(False)
@@ -51,7 +60,7 @@ class ImageOperationsMixin:
     def show_edited_image(self):
         path = self.workspace.current_image_path
         if path and path in self.workspace.edited_images:
-            self.current_image_item.setPixmap(self.cv2_to_qpixmap(self.workspace.edited_images[path]))
+            self.current_image_item.setPixmap(self.get_page_pixmap(path, self.workspace.edited_images[path], "edit"))
             for item in self.scene.items():
                 if isinstance(item, BoundingBoxItem):
                     item.setVisible(True)
@@ -89,29 +98,7 @@ class ImageOperationsMixin:
         path = self.workspace.current_image_path
         img = self.workspace.edited_images[path].copy()
 
-        self.set_processing_lock(True)
-        self.update_window_title("Generating Text Mask...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
-        self.statusBar().showMessage("Running masking model on full page...")
-
-        from src.core.detection import MaskingWorker
-        self.mask_worker = self._register_worker(MaskingWorker(self.masking_model, img))
-        self.mask_worker.process_finished.connect(self.on_mask_generated)
-        self.mask_worker.error.connect(self.on_mask_error)
-        self.mask_worker.start()
-
-    def on_mask_generated(self, full_mask):
-        import cv2
-        target_boxes = getattr(self, '_pending_mask_boxes', [])
-
-        path = self.workspace.current_image_path
-        if not path or path not in self.workspace.edited_images:
-            self._cleanup_masking_state()
-            return
-
-        img = self.workspace.edited_images[path]
-
+        boxes_data = []
         for box in target_boxes:
             rect = box.rect()
             scene_tl = box.mapToScene(rect.topLeft())
@@ -124,97 +111,72 @@ class ImageOperationsMixin:
             w, h = min(img.shape[1] - x, w), min(img.shape[0] - y, h)
             if w <= 0 or h <= 0: continue
 
-            raw_mask_roi = full_mask[y:y+h, x:x+w].copy()
+            boxes_data.append((x, y, w, h, box))
 
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            mask_roi = cv2.dilate(raw_mask_roi, kernel, iterations=3)
+        if not boxes_data:
+            self._cleanup_masking_state()
+            return
+
+        self.set_processing_lock(True)
+        self.update_window_title("Generating Text Mask...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.statusBar().showMessage("Running masking model on full page...")
+
+        from src.core.detection import MaskingWorker
+        orig_img = self.workspace.original_images.get(path, img)
+        self.mask_worker = self._register_worker(MaskingWorker(self.masking_model, img, orig_img, boxes_data))
+        self.mask_worker.process_finished.connect(self.on_mask_generated)
+        self.mask_worker.error.connect(self.on_mask_error)
+        self.mask_worker.start()
+
+    def on_mask_generated(self, results):
+        target_boxes = getattr(self, '_pending_mask_boxes', [])
+
+        path = self.workspace.current_image_path
+        if not path or path not in self.workspace.edited_images:
+            self._cleanup_masking_state()
+            return
+
+        for result in results:
+            box = result["box"]
+            mask_roi = result["mask"]
+            bg_mean = result["bg_mean"]
 
             box.generated_mask = mask_roi
             box.set_mask_display(mask_roi)
 
-            # --- CLASSIFY BUBBLE VS FLOATING TEXT ---
-            orig_img = self.workspace.original_images[path]
-            roi_img = orig_img[y:y+h, x:x+w]
+            box.bg_is_solid = result["is_solid"]
+            box.is_bubble = result["is_bubble"]
+            box.bg_is_noisy = result["bg_is_noisy"]
 
-            if roi_img.size > 0:
-                gray_roi = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY)
+            # --- AUTO-STYLING FOR LEGIBILITY ---
+            if self.settings.value("auto_style_enabled", True, type=bool):
+                from PySide6.QtGui import QColor
 
-                # Expand the text mask by 4 pixels to guarantee we completely cover the Japanese text and its anti-aliasing
-                kernel_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-                text_mask = cv2.dilate(raw_mask_roi, kernel_bg)
-                bg_mask = cv2.bitwise_not(text_mask)
+                do_color = self.settings.value("auto_style_color", True, type=bool)
+                do_stroke = self.settings.value("auto_style_stroke", True, type=bool)
 
-                bg_pixels = gray_roi[bg_mask > 127]
+                # Grays between 70 and 185 lack strong contrast with both black and white text.
+                is_mid_gray = 70 < bg_mean < 185
 
-                is_bubble = True
-                bg_is_noisy = False
-                is_solid = False
-                bg_mean = 255.0
-
-                if len(bg_pixels) > 0:
-                    bg_mean = float(np.mean(bg_pixels))
-                    bg_std = float(np.std(bg_pixels))
-
-                    # 1. Edge Detection (Detects drawing lines, panel borders, picture frames)
-                    edges = cv2.Canny(gray_roi, 50, 150)
-                    bg_edges = edges[bg_mask > 127]
-
-                    # If even 1% of the background consists of strong edges/lines, it is drawn art.
-                    edge_ratio = np.sum(bg_edges > 0) / len(bg_pixels)
-
-                    # 2. Strict Uniformity Checks
-                    white_ratio = np.sum(bg_pixels > 230) / len(bg_pixels)
-                    black_ratio = np.sum(bg_pixels < 25) / len(bg_pixels)
-
-                    # A solid background has near zero standard deviation (e.g. pure white, black, or flat gray)
-                    is_solid = bool(bg_std < 5.0 or white_ratio > 0.95 or black_ratio > 0.95)
-
-                    # A clean bubble/box has very few sharp internal drawn lines
-                    is_clean_box = bool(edge_ratio < 0.01)
-
-                    # --- MASK ENHANCEMENT FOR DARK BACKGROUNDS ---
-                    # White text blooms heavily on dark backgrounds. We aggressively dilate
-                    # the mask so inpainting doesn't smudge unmasked white halos.
-                    if bg_mean < 100:
-                        kernel_expand = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-                        mask_roi = cv2.dilate(mask_roi, kernel_expand, iterations=2)
-                        box.generated_mask = mask_roi
-                        box.set_mask_display(mask_roi)
-
-                    is_bubble = is_clean_box
-                    bg_is_noisy = not is_clean_box
-
-                box.bg_is_solid = is_solid
-                box.is_bubble = is_bubble
-                box.bg_is_noisy = bg_is_noisy
-
-                # --- AUTO-STYLING FOR LEGIBILITY ---
-                if self.settings.value("auto_style_enabled", True, type=bool):
-                    from PySide6.QtGui import QColor
-
-                    do_color = self.settings.value("auto_style_color", True, type=bool)
-                    do_stroke = self.settings.value("auto_style_stroke", True, type=bool)
-
-                    # Grays between 70 and 185 lack strong contrast with both black and white text.
-                    is_mid_gray = 70 < bg_mean < 185
-
-                    if box.is_bubble:
-                        if is_mid_gray:
-                            # Box is gray/gradient: needs a stroke to pop
-                            if do_color:
-                                box.text_color = QColor("black") if bg_mean > 127 else QColor("white")
-                            if do_stroke and box.stroke_width == 0:
-                                box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
-                                box.stroke_color = QColor("white") if box.text_color.name() == "#000000" else QColor("black")
-                        else:
-                            # Box is clearly light or dark: flip text color, no stroke needed
-                            if do_color:
-                                box.text_color = QColor("black") if bg_mean >= 185 else QColor("white")
-                    else:
-                        # Background is noisy art: always apply stroke to separate text from art
+                if box.is_bubble:
+                    if is_mid_gray:
+                        # Box is gray/gradient: needs a stroke to pop
+                        if do_color:
+                            box.text_color = QColor("black") if bg_mean > 127 else QColor("white")
                         if do_stroke and box.stroke_width == 0:
                             box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
-                            box.stroke_color = QColor("white") if box.text_color.lightness() < 128 else QColor("black")
+                            box.stroke_color = QColor("white") if box.text_color.name() == "#000000" else QColor("black")
+                    else:
+                        # Box is clearly light or dark: flip text color, no stroke needed
+                        if do_color:
+                            box.text_color = QColor("black") if bg_mean >= 185 else QColor("white")
+                else:
+                    # Background is noisy art: always apply stroke to separate text from art
+                    if do_stroke and box.stroke_width == 0:
+                        box.stroke_width = int(self.settings.value("auto_stroke_size", 4))
+                        box.stroke_color = QColor("white") if box.text_color.lightness() < 128 else QColor("black")
 
         auto_inpaint = getattr(self, '_pending_auto_inpaint', False)
         commit = getattr(self, '_pending_mask_commit', True)

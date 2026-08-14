@@ -74,6 +74,7 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.stroke_color = QColor("white")
 
         self.generated_mask = None
+        self._stroke_cache_key_value = None
 
     def rect(self):
         """Backwards compatibility for methods expecting a rect."""
@@ -124,7 +125,31 @@ class BoundingBoxItem(QGraphicsRectItem):
             self.mask_item.setPixmap(QPixmap())
         self.generated_mask = None
 
-    def update_typeset(self):
+    def _stroke_cache_key(self):
+        """All inputs that affect the stroke pixmap, or None if no stroke is drawn."""
+        if not self.is_typeset or not self.translated_text.strip() or self.stroke_width <= 0:
+            return None
+        r = self.rect()
+        return (
+            self.translated_text,
+            self.font_family,
+            self.font_size,
+            self.is_bold,
+            self.is_italic,
+            self.is_underline,
+            self.is_strikeout,
+            self.align,
+            self.valign,
+            self.indent,
+            self.line_spacing,
+            self.stroke_width,
+            self.stroke_color.name(),
+            round(r.width()),
+            round(r.height()),
+        )
+
+    def _update_layout(self):
+        """Rebuilds the text layout only (cheap). Safe to call during drags."""
         if not self.is_typeset or not self.translated_text.strip():
             self.text_layout = None
             self.update()
@@ -140,6 +165,22 @@ class BoundingBoxItem(QGraphicsRectItem):
         self.text_layout = self._create_layout_for_rect(
             self.translated_text, self.rect(), font
         )
+        self.update()
+
+    def update_typeset(self):
+        self._update_layout()
+
+        key = self._stroke_cache_key()
+        if key is None:
+            self.stroke_pixmap = None
+            self._stroke_cache_key_value = None
+            self.update()
+            return
+
+        if getattr(self, "_stroke_cache_key_value", None) == key:
+            return
+
+        self._stroke_cache_key_value = key
 
         if self.stroke_width > 0 and self.is_typeset and self.translated_text.strip():
             import cv2
@@ -512,7 +553,7 @@ class BoundingBoxItem(QGraphicsRectItem):
             self.setRect(self._rect)
 
             if self.is_typeset:
-                self.update_typeset()
+                self._update_layout()
             event.accept()
         elif self._prevent_move:
             # PATCH: Swallow move events if the box was just selected by this initial click
@@ -527,6 +568,8 @@ class BoundingBoxItem(QGraphicsRectItem):
             if self._initial_rect is not None and self.rect() != self._initial_rect:
                 self._commit_change("Resize Shape")
             self._initial_rect = None
+            if self.is_typeset:
+                self.update_typeset()
             event.accept()
         else:
             was_prevented = self._prevent_move

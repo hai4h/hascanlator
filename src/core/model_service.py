@@ -28,7 +28,7 @@ def serve(request_q, response_q, model_path):
         import onnxruntime as ort
         session = ort.InferenceSession(model_path, providers=_pick_providers())
         input_names = [inp.name for inp in session.get_inputs()]
-        response_q.put({"type": "ready", "input_names": input_names})
+        response_q.put({"type": "ready", "input_names": input_names, "providers": session.get_providers()})
     except Exception as e:
         response_q.put({"type": "error", "message": str(e)})
         return
@@ -69,7 +69,9 @@ class OnnxModelProxy:
         self._uid = 0
         self._buffered = []
         self._closed = False
-        self.input_names = self._wait_ready()
+        ready = self._wait_ready()
+        self.input_names = ready.get("input_names", [])
+        self.providers = ready.get("providers", [])
 
     def _wait_ready(self):
         while True:
@@ -83,7 +85,7 @@ class OnnxModelProxy:
                     raise RuntimeError("Model service process died during startup")
                 continue
             if msg.get("type") == "ready":
-                return msg.get("input_names", [])
+                return msg
             if msg.get("type") == "error":
                 self._cleanup_proc()
                 raise RuntimeError(f"Model service failed: {msg.get('message')}")

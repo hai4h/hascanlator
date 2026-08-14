@@ -1,5 +1,5 @@
 import os
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox, QMessageBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox, QMessageBox, QStyle
 from PySide6.QtCore import Qt, QThread, Signal
 
 class HfCacheDeleteWorker(QThread):
@@ -29,20 +29,28 @@ class HfCacheDeleteWorker(QThread):
 
 class ModelManagerWidget(QWidget):
     """Encapsulates the UI and logic for managing a single AI model."""
-    def __init__(self, main_window, title, desc, load_key, repo_getter, setting_key):
+    def __init__(self, main_window, meta):
         super().__init__()
         self.main_window = main_window
-        self.load_key = load_key
-        self.repo_getter = repo_getter
-        self.setting_key = setting_key
+        self.meta = meta
+        self.load_key = meta["key"]
+        self.repo_getter = meta["repo"] if callable(meta["repo"]) else lambda: meta["repo"]
+        self.setting_key = meta["setting"]
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
         header_layout = QHBoxLayout()
-        header_layout.addWidget(QLabel(f"<b>{title}</b><br>{desc}"))
+        header_layout.addWidget(QLabel(f"<b>{meta['title']}</b><br>{meta['desc']}"))
         self.disk_lbl = QLabel()
         header_layout.addWidget(self.disk_lbl, alignment=Qt.AlignRight | Qt.AlignTop)
+        self.btn_info = QPushButton(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation), "")
+        if self.btn_info.icon().isNull():
+            self.btn_info.setText("\u24d8")
+        self.btn_info.setFixedSize(24, 24)
+        self.btn_info.setToolTip("Show size, source and inference provider info")
+        self.btn_info.clicked.connect(self._open_info)
+        header_layout.addWidget(self.btn_info, alignment=Qt.AlignRight | Qt.AlignTop)
         layout.addLayout(header_layout)
 
         self.status_lbl = QLabel()
@@ -65,9 +73,15 @@ class ModelManagerWidget(QWidget):
         layout.addLayout(btn_layout)
 
         self.chk_auto = QCheckBox("Auto-load on next launch")
-        self.chk_auto.setChecked(self.main_window.settings.value(setting_key, False, type=bool))
-        self.chk_auto.stateChanged.connect(lambda: self.main_window.settings.setValue(setting_key, self.chk_auto.isChecked()))
+        self.chk_auto.setChecked(self.main_window.settings.value(self.setting_key, False, type=bool))
+        self.chk_auto.stateChanged.connect(lambda: self.main_window.settings.setValue(self.setting_key, self.chk_auto.isChecked()))
         layout.addWidget(self.chk_auto)
+
+    def _open_info(self):
+        from src.ui.settings.model_info import ModelInfoDialog
+        meta = dict(self.meta)
+        meta["repo"] = self.repo_getter()
+        ModelInfoDialog(self.main_window, meta).exec()
 
     def _delete_model(self):
         repo_id = self.repo_getter()
@@ -206,14 +220,14 @@ class ModelsTab(QWidget):
         layout.addWidget(QLabel("<hr>"))
 
         models = [
-            {"title": "MangaOCR (Text Recognition)", "desc": "Reads Japanese text inside the boxes.", "key": "manga_ocr", "repo": "kha-white/manga-ocr-base", "setting": "auto_load_mocr"},
-            {"title": "YOLOv8 Bubble Detector", "desc": "Accurate speech bubble locator.", "key": "yolo_detector", "repo": "ogkalu/manga-text-detector-yolov8s", "setting": "auto_load_yolo"},
-            {"title": "Text Masking Model (comictextdetector)", "desc": "Accurately masks text before inpainting.", "key": "masking_model", "repo": "local_masking", "setting": "auto_load_masking"},
-            {"title": "Image Inpainting Model (LaMa)", "desc": "Seamlessly removes text using masks.", "key": "inpaint_model", "repo": "local_inpaint", "setting": "auto_load_inpaint"},
+            {"title": "MangaOCR (Text Recognition)", "desc": "Reads Japanese text inside the boxes.", "key": "manga_ocr", "repo": "kha-white/manga-ocr-base", "setting": "auto_load_mocr", "kind": "torch", "source": "https://huggingface.co/kha-white/manga-ocr-base"},
+            {"title": "YOLOv8 Bubble Detector", "desc": "Accurate speech bubble locator.", "key": "yolo_detector", "repo": "ogkalu/manga-text-detector-yolov8s", "setting": "auto_load_yolo", "kind": "torch", "source": "https://huggingface.co/ogkalu/manga-text-detector-yolov8s"},
+            {"title": "Text Masking Model (comictextdetector)", "desc": "Accurately masks text before inpainting.", "key": "masking_model", "repo": "local_masking", "setting": "auto_load_masking", "kind": "onnx", "source": "https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/comictextdetector.pt.onnx", "local_path": "./models/comictextdetector.pt.onnx"},
+            {"title": "Image Inpainting Model (LaMa)", "desc": "Seamlessly removes text using masks.", "key": "inpaint_model", "repo": "local_inpaint", "setting": "auto_load_inpaint", "kind": "onnx", "source": "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx", "local_path": "./models/lama_fp32.onnx"},
         ]
 
         for i, m in enumerate(models):
-            widget = ModelManagerWidget(self.main_window, m["title"], m["desc"], m["key"], lambda r=m["repo"]: r, m["setting"])
+            widget = ModelManagerWidget(self.main_window, m)
             layout.addWidget(widget)
             self.model_widgets.append(widget)
             if i < len(models) - 1:

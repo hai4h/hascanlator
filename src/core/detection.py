@@ -69,16 +69,18 @@ class MaskingWorker(QThread):
     process_finished = Signal(object)
     error = Signal(str)
 
-    def __init__(self, masking_model, img):
+    def __init__(self, masking_model, img, orig_img, boxes_data):
         super().__init__()
         self.masking_model = masking_model
         self.img = img
+        self.orig_img = orig_img
+        self.boxes_data = boxes_data
 
     def run(self):
-        try:
-            import cv2
-            import numpy as np
+        import cv2
+        import numpy as np
 
+        try:
             img_rgb = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
             full_mask = self.masking_model(img_rgb)
 
@@ -90,14 +92,91 @@ class MaskingWorker(QThread):
                 full_mask = (full_mask * 255).astype(np.uint8) if full_mask.max() <= 1.0 else full_mask.astype(np.uint8)
 
             _, full_mask = cv2.threshold(full_mask, 100, 255, cv2.THRESH_BINARY)
-            self.process_finished.emit(full_mask)
+            self.process_finished.emit(self._analyze_boxes(full_mask))
 
         except Exception as e:
             print(f"Masking error: {e}")
-            import cv2
-            gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
-            _, full_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            self.process_finished.emit(full_mask)
+            try:
+                gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+                _, full_mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                self.process_finished.emit(self._analyze_boxes(full_mask))
+            except Exception as e2:
+                self.error.emit(str(e2))
+
+    def _analyze_boxes(self, full_mask):
+        """Per-box ROI extraction + background classification (runs off the UI thread)."""
+        import cv2
+        import numpy as np
+
+        orig_img = self.orig_img
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        kernel_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        kernel_expand = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+
+        results = []
+        for x, y, w, h, box_ref in self.boxes_data:
+            raw_mask_roi = full_mask[y:y+h, x:x+w].copy()
+
+            mask_roi = cv2.dilate(raw_mask_roi, kernel, iterations=3)
+
+            # --- CLASSIFY BUBBLE VS FLOATING TEXT ---
+            roi_img = orig_img[y:y+h, x:x+w]
+
+            is_bubble = True
+            bg_is_noisy = False
+            is_solid = False
+            bg_mean = 255.0
+
+            if roi_img.size > 0:
+                gray_roi = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY)
+
+                # Expand the text mask by 4 pixels to guarantee we completely cover
+                # the Japanese text and its anti-aliasing
+                text_mask = cv2.dilate(raw_mask_roi, kernel_bg)
+                bg_mask = cv2.bitwise_not(text_mask)
+
+                bg_pixels = gray_roi[bg_mask > 127]
+
+                if len(bg_pixels) > 0:
+                    bg_mean = float(np.mean(bg_pixels))
+                    bg_std = float(np.std(bg_pixels))
+
+                    # 1. Edge Detection (Detects drawing lines, panel borders, picture frames)
+                    edges = cv2.Canny(gray_roi, 50, 150)
+                    bg_edges = edges[bg_mask > 127]
+
+                    # If even 1% of the background consists of strong edges/lines, it is drawn art.
+                    edge_ratio = np.sum(bg_edges > 0) / len(bg_pixels)
+
+                    # 2. Strict Uniformity Checks
+                    white_ratio = np.sum(bg_pixels > 230) / len(bg_pixels)
+                    black_ratio = np.sum(bg_pixels < 25) / len(bg_pixels)
+
+                    # A solid background has near zero standard deviation (e.g. pure white, black, or flat gray)
+                    is_solid = bool(bg_std < 5.0 or white_ratio > 0.95 or black_ratio > 0.95)
+
+                    # A clean bubble/box has very few sharp internal drawn lines
+                    is_clean_box = bool(edge_ratio < 0.01)
+
+                    # --- MASK ENHANCEMENT FOR DARK BACKGROUNDS ---
+                    # White text blooms heavily on dark backgrounds. We aggressively dilate
+                    # the mask so inpainting doesn't smudge unmasked white halos.
+                    if bg_mean < 100:
+                        mask_roi = cv2.dilate(mask_roi, kernel_expand, iterations=2)
+
+                    is_bubble = is_clean_box
+                    bg_is_noisy = not is_clean_box
+
+            results.append({
+                "box": box_ref,
+                "mask": mask_roi,
+                "bg_mean": bg_mean,
+                "is_bubble": is_bubble,
+                "bg_is_noisy": bg_is_noisy,
+                "is_solid": is_solid,
+            })
+
+        return results
 
 class InpaintingWorker(QThread):
     process_finished = Signal(object)

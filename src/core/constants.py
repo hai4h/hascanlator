@@ -27,4 +27,5 @@ class MaskConfig:
 
 class AppCacheConfig:
     MAX_IMAGES_IN_RAM = 20
+    MAX_PIXMAPS_IN_RAM = 6
     MAX_HISTORY_IN_RAM = 20

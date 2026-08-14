@@ -106,10 +106,15 @@ class TranslationTab(QWidget):
 
         nmt_layout.addWidget(QLabel("<hr>"))
         
-        self.nmt_widget = ModelManagerWidget(
-            self.main_window, "NMT Engine", "Processes translation locally on your device.", "nmt_translator",
-            lambda: self.main_window.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en"), "auto_load_nmt"
-        )
+        self.nmt_widget = ModelManagerWidget(self.main_window, {
+            "title": "NMT Engine",
+            "desc": "Processes translation locally on your device.",
+            "key": "nmt_translator",
+            "repo": lambda: self.main_window.settings.value("nmt_model_repo", "Helsinki-NLP/opus-mt-ja-en"),
+            "setting": "auto_load_nmt",
+            "kind": "torch",
+            "source": "https://huggingface.co/{repo}",
+        })
         nmt_layout.addWidget(self.nmt_widget)
         nmt_layout.addStretch()
         self.trans_stack.addWidget(nmt_page)
