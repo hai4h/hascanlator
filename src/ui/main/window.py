@@ -205,10 +205,6 @@ class HAScanlatorWindow(
         self.typeset_toolbar.btn_toggle_typeset.clicked.connect(self.toggle_typeset_view)
         self.typeset_toolbar.act_auto_fit.triggered.connect(self.auto_fit_selected_fonts)
         self.typeset_toolbar.act_set_fit_ratio.triggered.connect(self.set_auto_fit_ratio)
-        self.typeset_toolbar.act_shape_sq.triggered.connect(lambda: self.set_selected_polygon_shape(4))
-        self.typeset_toolbar.act_shape_hex.triggered.connect(lambda: self.set_selected_polygon_shape(6))
-        self.typeset_toolbar.act_shape_oct.triggered.connect(lambda: self.set_selected_polygon_shape(8))
-        self.typeset_toolbar.act_shape_cir.triggered.connect(lambda: self.set_selected_polygon_shape(16))
 
         self.typeset_toolbar.btn_align_left.clicked.connect(lambda: self.set_text_alignment(Qt.AlignLeft))
         self.typeset_toolbar.btn_align_center.clicked.connect(lambda: self.set_text_alignment(Qt.AlignCenter))

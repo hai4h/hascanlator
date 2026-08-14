@@ -144,9 +144,7 @@ class HistoryMixin:
 
         # Restore using BoxState
         for state in step["boxes"]:
-            box = BoundingBoxItem(
-                state.polygon, is_auto=state.is_auto, shape_type=state.shape_type
-            )
+            box = BoundingBoxItem(state.rect, is_auto=state.is_auto)
             state.apply_to(box)
             self.scene.addItem(box)
 

@@ -9,36 +9,24 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QPixmap,
-    QPolygonF,
     QTextLayout,
     QTextOption,
 )
-from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsPolygonItem
+from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsRectItem
 
 
-class BoundingBoxItem(QGraphicsPolygonItem):
+class BoundingBoxItem(QGraphicsRectItem):
     NONE, LEFT, TOP, RIGHT, BOTTOM, TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT = (
         range(-9, 0)
     )
 
-    def __init__(self, rect_or_poly, is_auto=False, shape_type=None, parent=None):
-        if isinstance(rect_or_poly, QRectF):
-            self._rect = rect_or_poly
-            poly = QPolygonF(rect_or_poly)
-            self.shape_type = "rect" if shape_type is None else shape_type
-        else:
-            poly = rect_or_poly
-            self._rect = poly.boundingRect()
-            if shape_type is None:
-                self.shape_type = "rect" if poly.count() == 4 else "polygon"
-            else:
-                self.shape_type = shape_type
-
-        super().__init__(poly, parent)
+    def __init__(self, rect, is_auto=False, parent=None):
+        self._rect = rect
+        super().__init__(rect, parent)
         self.setFlags(
-            QGraphicsPolygonItem.ItemIsSelectable
-            | QGraphicsPolygonItem.ItemIsMovable
-            | QGraphicsPolygonItem.ItemSendsGeometryChanges
+            QGraphicsRectItem.ItemIsSelectable
+            | QGraphicsRectItem.ItemIsMovable
+            | QGraphicsRectItem.ItemSendsGeometryChanges
         )
         self.setAcceptHoverEvents(True)
         self.is_auto = is_auto
@@ -89,30 +77,15 @@ class BoundingBoxItem(QGraphicsPolygonItem):
 
     def rect(self):
         """Backwards compatibility for methods expecting a rect."""
-        return (
-            self._rect if self.shape_type == "rect" else self.polygon().boundingRect()
-        )
+        return self._rect
 
     def boundingRect(self):
         margin = float(self.handle_size)
-        if self.shape_type == "rect":
-            return self._rect.adjusted(-margin, -margin, margin, margin)
-        else:
-            return (
-                self.polygon().boundingRect().adjusted(-margin, -margin, margin, margin)
-            )
+        return self._rect.adjusted(-margin, -margin, margin, margin)
 
     def shape(self):
         path = QPainterPath()
-        if self.shape_type == "rect":
-            path.addRect(self.boundingRect())
-        else:
-            path.addPolygon(self.polygon())
-            s = self.handle_size
-            poly = self.polygon()
-            for i in range(poly.count()):
-                pt = poly[i]
-                path.addRect(pt.x() - s, pt.y() - s, s * 2, s * 2)
+        path.addRect(self.boundingRect())
         return path
 
     def set_mask_display(self, mask_array):
@@ -164,8 +137,8 @@ class BoundingBoxItem(QGraphicsPolygonItem):
         font.setUnderline(self.is_underline)
         font.setStrikeOut(self.is_strikeout)
 
-        self.text_layout = self._create_layout_for_polygon(
-            self.translated_text, self.polygon(), font
+        self.text_layout = self._create_layout_for_rect(
+            self.translated_text, self.rect(), font
         )
 
         if self.stroke_width > 0 and self.is_typeset and self.translated_text.strip():
@@ -174,7 +147,7 @@ class BoundingBoxItem(QGraphicsPolygonItem):
             from PySide6.QtGui import QImage, QPainter, QPixmap
 
             pad = self.stroke_width + 4
-            rect = self.polygon().boundingRect()
+            rect = self.rect()
 
             # Find the true rendered bounds including any overflowing words
             min_x, max_x = rect.left(), rect.right()
@@ -257,7 +230,7 @@ class BoundingBoxItem(QGraphicsPolygonItem):
 
         self.update()
 
-    def _create_layout_for_polygon(self, text, polygon, font):
+    def _create_layout_for_rect(self, text, rect, font):
         layout = QTextLayout(text, font)
 
         option = QTextOption()
@@ -270,34 +243,18 @@ class BoundingBoxItem(QGraphicsPolygonItem):
         font_metrics = QFontMetrics(font)
         line_height = int(font_metrics.height() * self.line_spacing)
 
-        current_y = polygon.boundingRect().top() + self.indent
+        current_y = rect.top() + self.indent
+        available_width = rect.width() - (self.indent * 2)
+        if available_width <= 0:
+            available_width = 10
 
         while True:
             line = layout.createLine()
             if not line.isValid():
                 break
 
-            min_x, max_x = self.get_polygon_x_bounds_at_y(
-                polygon, current_y, current_y + line_height
-            )
-
-            if min_x is None:
-                available_width = 0
-            else:
-                available_width = (max_x - min_x) - (self.indent * 2)
-
-            if available_width <= 0:
-                available_width = 10
-
             line.setLineWidth(available_width)
-
-            if min_x is not None:
-                line.setPosition(QPointF(min_x + self.indent, current_y))
-            else:
-                line.setPosition(
-                    QPointF(polygon.boundingRect().left() + self.indent, current_y)
-                )
-
+            line.setPosition(QPointF(rect.left() + self.indent, current_y))
             current_y += line_height
 
         layout.endLayout()
@@ -308,15 +265,15 @@ class BoundingBoxItem(QGraphicsPolygonItem):
             total_text_height = (
                 last_line.position().y()
                 + line_height
-                - (polygon.boundingRect().top() + self.indent)
+                - (rect.top() + self.indent)
             )
 
-            poly_h = polygon.boundingRect().height() - (self.indent * 2)
+            rect_h = rect.height() - (self.indent * 2)
 
             if self.valign == Qt.AlignVCenter:
-                y_offset = (poly_h - total_text_height) / 2.0
+                y_offset = (rect_h - total_text_height) / 2.0
             elif self.valign == Qt.AlignBottom:
-                y_offset = poly_h - total_text_height
+                y_offset = rect_h - total_text_height
             else:
                 y_offset = 0
 
@@ -326,23 +283,6 @@ class BoundingBoxItem(QGraphicsPolygonItem):
                     line.setPosition(line.position() + QPointF(0, y_offset))
 
         return layout
-
-    def get_polygon_x_bounds_at_y(self, polygon, y, next_y):
-        bounds = polygon.boundingRect()
-        slice_rect = QRectF(bounds.left() - 100, y, bounds.width() + 200, next_y - y)
-
-        poly_path = QPainterPath()
-        poly_path.addPolygon(polygon)
-
-        slice_path = QPainterPath()
-        slice_path.addRect(slice_rect)
-
-        intersection = poly_path.intersected(slice_path)
-        if intersection.isEmpty():
-            return None, None
-
-        int_bounds = intersection.boundingRect()
-        return int_bounds.left(), int_bounds.right()
 
     def auto_fit_font_size(self):
         if not self.translated_text.strip():
@@ -358,14 +298,14 @@ class BoundingBoxItem(QGraphicsPolygonItem):
         font.setUnderline(self.is_underline)
         font.setStrikeOut(self.is_strikeout)
 
-        poly_height = self.polygon().boundingRect().height() - (self.indent * 2)
-        target_height = poly_height * self.auto_fit_target_ratio
+        rect_height = self.rect().height() - (self.indent * 2)
+        target_height = rect_height * self.auto_fit_target_ratio
 
         while low <= high:
             mid = (low + high) // 2
             font.setPixelSize(mid)
-            layout = self._create_layout_for_polygon(
-                self.translated_text, self.polygon(), font
+            layout = self._create_layout_for_rect(
+                self.translated_text, self.rect(), font
             )
 
             total_height = 0
@@ -384,7 +324,7 @@ class BoundingBoxItem(QGraphicsPolygonItem):
                 total_height = (
                     last_line.position().y()
                     + int(QFontMetrics(font).height() * self.line_spacing)
-                    - self.polygon().boundingRect().top()
+                    - self.rect().top()
                     - self.indent
                 )
 
@@ -396,38 +336,6 @@ class BoundingBoxItem(QGraphicsPolygonItem):
 
         self.font_size = best_size
         self.update_typeset()
-
-    def set_vertex_count(self, n):
-        import math
-
-        bounds = self.rect()
-        cx = bounds.center().x()
-        cy = bounds.center().y()
-        rx = bounds.width() / 2.0
-        ry = bounds.height() / 2.0
-
-        new_poly = QPolygonF()
-        if n == 4:
-            self.shape_type = "rect"
-            self._rect = bounds
-            new_poly.append(QPointF(bounds.left(), bounds.top()))
-            new_poly.append(QPointF(bounds.right(), bounds.top()))
-            new_poly.append(QPointF(bounds.right(), bounds.bottom()))
-            new_poly.append(QPointF(bounds.left(), bounds.bottom()))
-        else:
-            self.shape_type = "polygon"
-            # Start at 0 radians (right-most point) to ensure pointed left/right corners
-            # and flat edges at the top/bottom (ideal for horizontal text wrapping)
-            offset = 0
-            for i in range(n):
-                angle = offset + (i * 2 * math.pi / n)
-                px = cx + rx * math.cos(angle)
-                py = cy + ry * math.sin(angle)
-                new_poly.append(QPointF(px, py))
-
-        self.setPolygon(new_poly)
-        if self.is_typeset:
-            self.update_typeset()
 
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)
@@ -451,25 +359,19 @@ class BoundingBoxItem(QGraphicsPolygonItem):
             painter.setBrush(Qt.white)
             painter.setPen(QPen(Qt.black, 1))
             s = 8
-            if self.shape_type == "polygon":
-                poly = self.polygon()
-                for i in range(poly.count()):
-                    pt = poly[i]
-                    painter.drawRect(QRectF(pt.x() - s / 2, pt.y() - s / 2, s, s))
-            else:
-                r = self._rect
-                centers = [
-                    r.topLeft(),
-                    r.topRight(),
-                    r.bottomLeft(),
-                    r.bottomRight(),
-                    QPointF(r.left(), r.center().y()),
-                    QPointF(r.right(), r.center().y()),
-                    QPointF(r.center().x(), r.top()),
-                    QPointF(r.center().x(), r.bottom()),
-                ]
-                for pt in centers:
-                    painter.drawRect(QRectF(pt.x() - s / 2, pt.y() - s / 2, s, s))
+            r = self._rect
+            centers = [
+                r.topLeft(),
+                r.topRight(),
+                r.bottomLeft(),
+                r.bottomRight(),
+                QPointF(r.left(), r.center().y()),
+                QPointF(r.right(), r.center().y()),
+                QPointF(r.center().x(), r.top()),
+                QPointF(r.center().x(), r.bottom()),
+            ]
+            for pt in centers:
+                painter.drawRect(QRectF(pt.x() - s / 2, pt.y() - s / 2, s, s))
             painter.restore()
 
     def toggle_typeset(self, force_state=None):
@@ -496,7 +398,7 @@ class BoundingBoxItem(QGraphicsPolygonItem):
         self.update()
 
     def itemChange(self, change, value):
-        if change == QGraphicsPolygonItem.ItemSelectedHasChanged:
+        if change == QGraphicsRectItem.ItemSelectedHasChanged:
             if self.is_typeset:
                 if self.isSelected():
                     self.setPen(QPen(QColor(100, 100, 255), 1, Qt.DashLine))
@@ -515,17 +417,6 @@ class BoundingBoxItem(QGraphicsPolygonItem):
         return super().itemChange(change, value)
 
     def get_handle_at(self, pos):
-        if self.shape_type == "polygon":
-            poly = self.polygon()
-            for i in range(poly.count()):
-                pt = poly[i]
-                if (
-                    abs(pt.x() - pos.x()) <= self.handle_size
-                    and abs(pt.y() - pos.y()) <= self.handle_size
-                ):
-                    return i
-            return self.NONE
-
         r = self._rect
         x, y = pos.x(), pos.y()
         in_x = min(self.handle_size, r.width() / 3.0)
@@ -584,7 +475,7 @@ class BoundingBoxItem(QGraphicsPolygonItem):
     def mousePressEvent(self, event):
         if self.current_handle != self.NONE and self.isSelected():
             self.resizing_handle = self.current_handle
-            self._initial_poly = QPolygonF(self.polygon())  # Track shape before resize
+            self._initial_rect = QRectF(self._rect)  # Track shape before resize
             event.accept()
         else:
             was_selected = self.isSelected()
@@ -600,30 +491,25 @@ class BoundingBoxItem(QGraphicsPolygonItem):
     def mouseMoveEvent(self, event):
         if self.resizing_handle != self.NONE:
             self.prepareGeometryChange()
-            if self.resizing_handle >= 0:
-                poly = self.polygon()
-                poly[self.resizing_handle] = event.pos()
-                self.setPolygon(poly)
-            else:
-                rect, pos, min_size = QRectF(self._rect), event.pos(), 15
-                if self.resizing_handle in (self.LEFT, self.TOP_LEFT, self.BOTTOM_LEFT):
-                    rect.setLeft(min(pos.x(), rect.right() - min_size))
-                if self.resizing_handle in (
-                    self.RIGHT,
-                    self.TOP_RIGHT,
-                    self.BOTTOM_RIGHT,
-                ):
-                    rect.setRight(max(pos.x(), rect.left() + min_size))
-                if self.resizing_handle in (self.TOP, self.TOP_LEFT, self.TOP_RIGHT):
-                    rect.setTop(min(pos.y(), rect.bottom() - min_size))
-                if self.resizing_handle in (
-                    self.BOTTOM,
-                    self.BOTTOM_LEFT,
-                    self.BOTTOM_RIGHT,
-                ):
-                    rect.setBottom(max(pos.y(), rect.top() + min_size))
-                self._rect = rect
-                self.setPolygon(QPolygonF(self._rect))
+            rect, pos, min_size = QRectF(self._rect), event.pos(), 15
+            if self.resizing_handle in (self.LEFT, self.TOP_LEFT, self.BOTTOM_LEFT):
+                rect.setLeft(min(pos.x(), rect.right() - min_size))
+            if self.resizing_handle in (
+                self.RIGHT,
+                self.TOP_RIGHT,
+                self.BOTTOM_RIGHT,
+            ):
+                rect.setRight(max(pos.x(), rect.left() + min_size))
+            if self.resizing_handle in (self.TOP, self.TOP_LEFT, self.TOP_RIGHT):
+                rect.setTop(min(pos.y(), rect.bottom() - min_size))
+            if self.resizing_handle in (
+                self.BOTTOM,
+                self.BOTTOM_LEFT,
+                self.BOTTOM_RIGHT,
+            ):
+                rect.setBottom(max(pos.y(), rect.top() + min_size))
+            self._rect = rect
+            self.setRect(self._rect)
 
             if self.is_typeset:
                 self.update_typeset()
@@ -638,9 +524,9 @@ class BoundingBoxItem(QGraphicsPolygonItem):
         if self.resizing_handle != self.NONE:
             self.resizing_handle = self.NONE
             # PATCH: If shape actually changed during resize, log to history
-            if self._initial_poly is not None and self.polygon() != self._initial_poly:
+            if self._initial_rect is not None and self.rect() != self._initial_rect:
                 self._commit_change("Resize Shape")
-            self._initial_poly = None
+            self._initial_rect = None
             event.accept()
         else:
             was_prevented = self._prevent_move

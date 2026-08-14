@@ -364,14 +364,6 @@ class ImageOperationsMixin:
                 changed = True
             if changed: self.commit_history("Change Auto-Fit Ratio", aggregate=True)
 
-    def set_selected_polygon_shape(self, n):
-        changed = False
-        for box in self.scene.selectedItems():
-            if isinstance(box, BoundingBoxItem):
-                box.set_vertex_count(n)
-                changed = True
-        if changed: self.commit_history(f"Set Shape ({n} points)", aggregate=True)
-
     def toggle_typeset_view(self):
         changed = False
         for box in self.scene.selectedItems():

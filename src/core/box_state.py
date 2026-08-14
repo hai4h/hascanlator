@@ -2,15 +2,14 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QColor, QPolygonF
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor
 
 
 @dataclass
 class BoxState:
-    polygon: QPolygonF
+    rect: QRectF
     pos: QPointF
-    shape_type: str = "rect"
     is_auto: bool = False
     raw_text: str = ""
     translated_text: str = ""
@@ -38,10 +37,10 @@ class BoxState:
         """Convert PySide6 objects and numpy arrays to primitives before pickling to disk."""
         state = self.__dict__.copy()
 
-        # 1. Convert QPolygonF to list of (x, y) tuples
-        if state.get("polygon") is not None:
-            poly = state["polygon"]
-            state["polygon"] = [(poly[i].x(), poly[i].y()) for i in range(poly.count())]
+        # 1. Convert QRectF to (x, y, w, h) tuple
+        if state.get("rect") is not None:
+            r = state["rect"]
+            state["rect"] = (r.x(), r.y(), r.width(), r.height())
 
         # 2. Convert QPointF to (x, y) tuple
         if state.get("pos") is not None:
@@ -62,12 +61,23 @@ class BoxState:
 
     def __setstate__(self, state):
         """Rebuild PySide6 objects and numpy arrays when loading from disk."""
-        # 1. Rebuild QPolygonF
-        if state.get("polygon") is not None:
-            poly = QPolygonF()
-            for x, y in state["polygon"]:
-                poly.append(QPointF(x, y))
-            state["polygon"] = poly
+        # 1. Rebuild QRectF (with fallback for legacy pickles that stored a polygon)
+        rect_data = state.get("rect")
+        if rect_data is None and state.get("polygon") is not None:
+            rect_data = state.pop("polygon")
+        if rect_data is not None:
+            if len(rect_data) == 4 and not isinstance(rect_data[0], (tuple, list)):
+                state["rect"] = QRectF(*rect_data)
+            else:
+                # Legacy polygon point list: derive its bounding rect
+                x_coords = [p[0] for p in rect_data]
+                y_coords = [p[1] for p in rect_data]
+                state["rect"] = QRectF(
+                    min(x_coords),
+                    min(y_coords),
+                    max(x_coords) - min(x_coords),
+                    max(y_coords) - min(y_coords),
+                )
 
         # 2. Rebuild QPointF
         if state.get("pos") is not None:
@@ -89,9 +99,8 @@ class BoxState:
     @classmethod
     def from_item(cls, item: BoundingBoxItem) -> BoxState:
         return cls(
-            polygon=item.polygon(),
+            rect=item.rect(),
             pos=item.scenePos(),
-            shape_type=item.shape_type,
             is_auto=item.is_auto,
             raw_text=item.raw_text,
             translated_text=item.translated_text,
