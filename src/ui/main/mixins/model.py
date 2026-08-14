@@ -56,18 +56,34 @@ class ModelManagementMixin:
             return os.path.exists("./models/lama_fp32.onnx")
         if repo_id == "local":
             return True
+
+        cache = getattr(self, "_download_cache", None)
+        if cache is None:
+            self._download_cache = {}
+            cache = self._download_cache
+        if repo_id in cache:
+            return cache[repo_id]
+
         try:
             cache_dir = os.path.abspath(os.path.join(os.getcwd(), "models", "hf_cache"))
             if not os.path.exists(cache_dir):
+                cache[repo_id] = False
                 return False
 
             hf_cache_info = scan_cache_dir(cache_dir)
             for repo in hf_cache_info.repos:
                 if repo.repo_id == repo_id:
+                    cache[repo_id] = True
                     return True
+            cache[repo_id] = False
             return False
         except Exception:
             return False
+
+    def _invalidate_model_cache(self):
+        """Forces is_model_downloaded to re-scan the disk (after load/delete events)."""
+        if hasattr(self, "_download_cache"):
+            self._download_cache.clear()
 
     def ensure_models_ready(self, required_models):
         """Checks a list of (model_key, repo_id) tuples. Prompts once for all missing models."""
@@ -260,6 +276,8 @@ class ModelManagementMixin:
 
         self.is_loading_model_seq = False
 
+        self._invalidate_model_cache()
+
         if (
             not self.model_load_queue
             and hasattr(self, "model_progress_dialog")
@@ -306,6 +324,7 @@ class ModelManagementMixin:
         thread_ref.deleteLater()
 
         self.is_loading_model_seq = False
+        self._invalidate_model_cache()
         self.update_window_title()
         self.update_button_states()
         self.model_status_changed.emit()

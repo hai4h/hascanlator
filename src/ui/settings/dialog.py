@@ -36,6 +36,33 @@ class SettingsDialog(QDialog):
 
         self.update_ui_state()
 
+    def closeEvent(self, event):
+        """Keeps background workers alive if the dialog closes mid-operation."""
+        orphans = self.main_window._orphaned_workers
+
+        fd = self.tab_fonts.font_downloader
+        if fd is not None and fd.isRunning():
+            sig = getattr(fd, "process_finished", None)
+            if sig is not None:
+                try:
+                    sig.disconnect()
+                except RuntimeError:
+                    pass
+            orphans.append(fd)
+
+        for w in self.tab_models.model_widgets:
+            dw = getattr(w, "_delete_worker", None)
+            if dw is not None and dw.isRunning():
+                sig = getattr(dw, "finished_ok", None)
+                if sig is not None:
+                    try:
+                        sig.disconnect()
+                    except RuntimeError:
+                        pass
+                orphans.append(dw)
+
+        super().closeEvent(event)
+
     def update_ui_state(self):
         try:
             self.tab_models.update_ui_state()

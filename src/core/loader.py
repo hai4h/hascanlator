@@ -74,18 +74,26 @@ class NmtLoader(ModelLoader):
                 self.device = dev
 
             def __call__(self, text, src_lang="ja", tgt_lang="en"):
+                # Accept a single string or a list of strings (batch translate)
+                is_batch = isinstance(text, (list, tuple))
+                texts = list(text) if is_batch else [text]
+                texts = [t for t in texts if t and t.strip()]
+                if not texts:
+                    return []
+
                 if "nllb" in self.repo:
                     lang_map = {"auto": "jpn_Jpan", "ja": "jpn_Jpan", "en": "eng_Latn", "ko": "kor_Hang", "zh-CN": "zho_Hans", "vi": "vie_Latn", "es": "spa_Latn", "fr": "fra_Latn"}
                     self.tokenizer.src_lang = lang_map.get(src_lang, "jpn_Jpan")
-                    inputs = self.tokenizer(text, return_tensors="pt", padding=True).to(self.device)
+                    inputs = self.tokenizer(texts, return_tensors="pt", padding=True).to(self.device)
                     target_code = lang_map.get(tgt_lang, "eng_Latn")
                     forced_bos_token_id = self.tokenizer.lang_code_to_id.get(target_code, self.tokenizer.convert_tokens_to_ids(target_code))
                     translated_tokens = self.model.generate(**inputs, forced_bos_token_id=forced_bos_token_id)
                 else:
-                    inputs = self.tokenizer(text, return_tensors="pt", padding=True).to(self.device)
+                    inputs = self.tokenizer(texts, return_tensors="pt", padding=True).to(self.device)
                     translated_tokens = self.model.generate(**inputs)
-                res_text = self.tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
-                return [{"translation_text": res_text}]
+
+                results = self.tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
+                return [{"translation_text": r} for r in results]
 
         return NMTWrapper(tokenizer, model, repo_id, device)
 

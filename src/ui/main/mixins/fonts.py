@@ -4,11 +4,18 @@ from PySide6.QtGui import QFontDatabase, QFont, QColor
 from PySide6.QtWidgets import QListWidget
 
 class FontManagementMixin:
+    def get_font_families(self):
+        """Cached list of all font families. Invalidated when fonts are reloaded."""
+        if getattr(self, "_font_families_cache", None) is None:
+            self._font_families_cache = QFontDatabase.families()
+        return self._font_families_cache
+
     def reload_custom_fonts(self):
         if hasattr(self, '_loaded_font_ids'):
             for fid in self._loaded_font_ids:
                 QFontDatabase.removeApplicationFont(fid)
         self._loaded_font_ids = []
+        self._font_families_cache = None
 
         fonts_dir = os.path.join(os.getcwd(), "fonts")
         os.makedirs(fonts_dir, exist_ok=True)
@@ -40,7 +47,7 @@ class FontManagementMixin:
         combo = self.typeset_toolbar.font_combo
         combo.blockSignals(True)
         combo.clear()
-        all_fonts = QFontDatabase.families()
+        all_fonts = self.get_font_families()
 
         def add_header(text):
             combo.addItem(text)

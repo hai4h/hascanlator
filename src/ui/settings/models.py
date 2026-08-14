@@ -1,7 +1,31 @@
 import os
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox, QMessageBox
-from PySide6.QtCore import Qt
-from huggingface_hub import scan_cache_dir
+from PySide6.QtCore import Qt, QThread, Signal
+
+class HfCacheDeleteWorker(QThread):
+    """Deletes an HF model cache entry off the UI thread (multi-GB operations)."""
+    finished_ok = Signal(bool, str)
+
+    def __init__(self, repo_id, cache_dir, parent=None):
+        super().__init__(parent)
+        self.repo_id = repo_id
+        self.cache_dir = cache_dir
+
+    def run(self):
+        try:
+            from huggingface_hub import scan_cache_dir
+            hf_cache_info = scan_cache_dir(self.cache_dir)
+            for repo in hf_cache_info.repos:
+                if repo.repo_id == self.repo_id:
+                    strategy = hf_cache_info.delete_revisions(
+                        *[rev.commit_hash for rev in repo.revisions]
+                    )
+                    strategy.execute()
+                    self.finished_ok.emit(True, "")
+                    return
+            self.finished_ok.emit(False, "Model was not found in the local cache.")
+        except Exception as e:
+            self.finished_ok.emit(False, str(e))
 
 class ModelManagerWidget(QWidget):
     """Encapsulates the UI and logic for managing a single AI model."""
@@ -50,28 +74,42 @@ class ModelManagerWidget(QWidget):
         reply = QMessageBox.question(self, "Confirm Deletion", "Are you sure you want to delete this model from your disk? You will need to redownload it next time.", QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             self.main_window.unload_model(self.load_key)
+            self.main_window._invalidate_model_cache()
             try:
                 if repo_id == "local_masking":
                     if os.path.exists("./models/comictextdetector.pt.onnx"):
                         os.remove("./models/comictextdetector.pt.onnx")
                     QMessageBox.information(self, "Success", "Model successfully deleted from disk.")
+                    self.main_window.model_status_changed.emit()
                 elif repo_id == "local_inpaint":
                     if os.path.exists("./models/lama_fp32.onnx"):
                         os.remove("./models/lama_fp32.onnx")
                     QMessageBox.information(self, "Success", "Model successfully deleted from disk.")
+                    self.main_window.model_status_changed.emit()
                 else:
                     cache_dir = os.path.abspath(os.path.join(os.getcwd(), "models", "hf_cache"))
-                    if os.path.exists(cache_dir):
-                        hf_cache_info = scan_cache_dir(cache_dir)
-                        for repo in hf_cache_info.repos:
-                            if repo.repo_id == repo_id:
-                                strategy = hf_cache_info.delete_revisions(*[rev.commit_hash for rev in repo.revisions])
-                                strategy.execute()
-                                break
-                    QMessageBox.information(self, "Success", "Model successfully deleted from disk.")
+                    if not os.path.exists(cache_dir):
+                        QMessageBox.warning(self, "Delete Failed", "Model was not found in the local cache.")
+                        self.main_window.model_status_changed.emit()
+                        return
+                    self.btn_delete.setEnabled(False)
+                    self.btn_load.setEnabled(False)
+                    self.btn_unload.setEnabled(False)
+                    self.status_lbl.setText("Status: <font color='orange'>Deleting from disk...</font>")
+                    self._delete_worker = HfCacheDeleteWorker(repo_id, cache_dir)
+                    self._delete_worker.finished_ok.connect(self._on_delete_finished)
+                    self._delete_worker.start()
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Could not delete model cache: {e}")
-            self.main_window.model_status_changed.emit()
+
+    def _on_delete_finished(self, success, msg):
+        self._delete_worker = None
+        self.main_window._invalidate_model_cache()
+        self.main_window.model_status_changed.emit()
+        if success:
+            QMessageBox.information(self, "Success", "Model successfully deleted from disk.")
+        else:
+            QMessageBox.warning(self, "Delete Failed", msg or "Could not delete model cache.")
 
     def update_state(self):
         is_loaded = False
@@ -101,7 +139,8 @@ class ModelManagerWidget(QWidget):
             self.chk_auto.blockSignals(True)
             self.chk_auto.setChecked(False)
             self.chk_auto.blockSignals(False)
-            self.main_window.settings.setValue(self.setting_key, False)
+            if self.main_window.settings.value(self.setting_key, False):
+                self.main_window.settings.setValue(self.setting_key, False)
             self.disk_lbl.setText("<font color='grey'><b>[Not Downloaded]</b></font>")
             self.btn_delete.setEnabled(False)
             self.btn_load.setText("Download && Load")

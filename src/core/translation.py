@@ -24,20 +24,31 @@ class BatchTranslationWorker(QThread):
                 from deep_translator import GoogleTranslator
                 translator = GoogleTranslator(source=self.source_lang, target=self.target_lang)
                 
-            for i, (text, box_ref) in enumerate(self.boxes_data):
-                if not text or not text.strip():
-                    self.progress.emit("", box_ref)
-                else:
-                    if self.engine == "google":
-                        translated_text = translator.translate(text)
+                for i, (text, box_ref) in enumerate(self.boxes_data):
+                    if not text or not text.strip():
+                        self.progress.emit("", box_ref)
                     else:
-                        # Local NMT (Helsinki-NLP/opus-mt-ja-en) is fixed to Japanese -> English
-                        result = self.nmt_model(text)
-                        translated_text = result[0]['translation_text']
-                        
-                    self.progress.emit(translated_text, box_ref)
-                
-                self.progress_percent.emit(int(((i + 1) / total) * 100))
+                        self.progress.emit(translator.translate(text), box_ref)
+                    self.progress_percent.emit(int(((i + 1) / total) * 100))
+            else:
+                # Local NMT: batch all non-empty texts into a single generate call.
+                # Skip empty entries so the model is never fed padding-only rows.
+                to_translate = [
+                    (text, box_ref)
+                    for text, box_ref in self.boxes_data
+                    if text and text.strip()
+                ]
+                results = []
+                if to_translate:
+                    results = self.nmt_model([t for t, _ in to_translate])
+
+                res_iter = iter(results)
+                for i, (text, box_ref) in enumerate(self.boxes_data):
+                    if not text or not text.strip():
+                        self.progress.emit("", box_ref)
+                    else:
+                        self.progress.emit(next(res_iter)["translation_text"], box_ref)
+                    self.progress_percent.emit(int(((i + 1) / total) * 100))
                 
             self.process_finished.emit()
         except Exception as e:

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QCheckBox, QPushButton, QListWidget, QScrollArea, QMessageBox
 )
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QFont, QDesktopServices, QFontDatabase
+from PySide6.QtGui import QFont, QDesktopServices
 from src.core.downloaders import FontDownloadWorker
 
 class FontsTab(QWidget):
@@ -31,7 +31,7 @@ class FontsTab(QWidget):
 
         fd_layout.addWidget(QLabel("Family:"), 0, 0)
         self.def_font_combo = QComboBox()
-        self.def_font_combo.addItems(QFontDatabase.families())
+        self.def_font_combo.addItems(self.main_window.get_font_families())
         def_fam = self.main_window.settings.value("default_font_family", "sans-serif")
         idx_fam = self.def_font_combo.findText(def_fam, Qt.MatchContains)
         if idx_fam >= 0:
@@ -216,6 +216,8 @@ class FontsTab(QWidget):
             self.btn_dl_font.setStyleSheet("background-color: #0056b3; color: white;")
 
     def _download_manga_font(self):
+        if self.font_downloader and self.font_downloader.isRunning():
+            return
         self.btn_dl_font.setEnabled(False)
         self.btn_dl_font.setText("Downloading...")
         self.btn_dl_font.setStyleSheet("background-color: #444444; color: #aaaaaa;")
@@ -249,7 +251,7 @@ class FontsTab(QWidget):
 
         self.def_font_combo.blockSignals(True)
         self.def_font_combo.clear()
-        self.def_font_combo.addItems(QFontDatabase.families())
+        self.def_font_combo.addItems(self.main_window.get_font_families())
 
         def_fam = self.main_window.settings.value("default_font_family", "sans-serif")
         idx_fam = self.def_font_combo.findText(def_fam, Qt.MatchContains)

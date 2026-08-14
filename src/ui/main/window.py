@@ -62,10 +62,16 @@ class HAScanlatorWindow(
         self.loader_threads = []
         self.recent_fonts = []
         self.external_fonts = []
+        self._orphaned_workers = []
 
         self._setup_ui()
         self._connect_signals()
         self._setup_shortcuts()
+
+        self._typeset_debounce = QTimer(self)
+        self._typeset_debounce.setSingleShot(True)
+        self._typeset_debounce.setInterval(80)
+        self._typeset_debounce.timeout.connect(self._flush_typeset_update)
 
         self.update_window_title()
         self.update_button_states()
@@ -179,9 +185,11 @@ class HAScanlatorWindow(
         chk_inpaint = QCheckBox("5. Inpaint Mask"); chk_inpaint.setChecked(self.settings.value("auto_scan_inpaint", False, type=bool))
         chk_typeset = QCheckBox("6. Typeset"); chk_typeset.setChecked(self.settings.value("auto_scan_typeset", False, type=bool))
 
-        chk_trans.toggled.connect(lambda v: self.settings.setValue("auto_scan_translate", v) if not v or chk_ocr.isChecked() else chk_ocr.setChecked(True))
-        chk_inpaint.toggled.connect(lambda v: self.settings.setValue("auto_scan_inpaint", v) if not v or chk_mask.isChecked() else chk_mask.setChecked(True))
-        chk_type_toggled = lambda v: self.settings.setValue("auto_scan_typeset", v) if not v or chk_trans.isChecked() else chk_trans.setChecked(True)
+        chk_ocr.toggled.connect(lambda v: self.settings.setValue("auto_scan_ocr", v))
+        chk_trans.toggled.connect(lambda v: self._toggle_auto_scan_dep("auto_scan_translate", chk_ocr, v))
+        chk_mask.toggled.connect(lambda v: self.settings.setValue("auto_scan_mask", v))
+        chk_inpaint.toggled.connect(lambda v: self._toggle_auto_scan_dep("auto_scan_inpaint", chk_mask, v))
+        chk_typeset.toggled.connect(lambda v: self._toggle_auto_scan_dep("auto_scan_typeset", chk_trans, v))
 
         for w in [chk_ocr, chk_trans, chk_mask, chk_inpaint, chk_typeset]: config_layout.addWidget(w)
         act = QWidgetAction(config_menu); act.setDefaultWidget(config_widget); config_menu.addAction(act)
@@ -238,6 +246,12 @@ class HAScanlatorWindow(
         self.typeset_toolbar.btn_stroke_minus.clicked.connect(lambda: self.typeset_toolbar.spin_stroke_width.setValue(self.typeset_toolbar.spin_stroke_width.value() - 1))
         self.typeset_toolbar.combo_stroke_color.currentTextChanged.connect(self.set_text_stroke_color)
 
+    def _toggle_auto_scan_dep(self, setting_key, prereq_chk, value):
+        """Persists an Auto-Scan toggle, auto-enabling its prerequisite checkbox."""
+        self.settings.setValue(setting_key, value)
+        if value and not prereq_chk.isChecked():
+            prereq_chk.setChecked(True)
+
     def closeEvent(self, event):
         """Safely terminates all threads and frees models before closing."""
         # Stop processing workers
@@ -255,6 +269,14 @@ class HAScanlatorWindow(
                 loader.wait(2000)
             loader.deleteLater()
         self.loader_threads.clear()
+
+        # Stop orphaned background workers (font downloads, cache deletions)
+        for worker in list(self._orphaned_workers):
+            if worker.isRunning():
+                worker.quit()
+                worker.wait(2000)
+            worker.deleteLater()
+        self._orphaned_workers.clear()
 
         # Free models explicitly
         for key in ("mocr_model", "yolo_model", "nmt_model", "masking_model", "inpaint_model"):
@@ -371,7 +393,12 @@ class HAScanlatorWindow(
     def on_trans_text_edited(self):
         if not self._updating_ui and self.current_selected_box:
             self.current_selected_box.translated_text = self.right_dock.trans_input.toPlainText()
-            if self.current_selected_box.is_typeset: self.current_selected_box.update_typeset()
+            if self.current_selected_box.is_typeset:
+                self._typeset_debounce.start()
+
+    def _flush_typeset_update(self):
+        if self.current_selected_box and self.current_selected_box.is_typeset:
+            self.current_selected_box.update_typeset()
 
     def select_all_boxes(self):
         for item in self.scene.items():

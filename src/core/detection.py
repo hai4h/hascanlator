@@ -114,7 +114,6 @@ class InpaintingWorker(QThread):
         try:
             import cv2
             import numpy as np
-            import gc
 
             res_img = self.img.copy()
             total = len(self.boxes_data)
@@ -218,10 +217,9 @@ class InpaintingWorker(QThread):
 
                 self.progress_percent.emit(int(((i + 1) / total) * 100))
 
-                # Force garbage collection to clear ONNX tensors between loops
+                # Clear ONNX tensor references between loops (refcount handles the memory)
                 del context_crop, context_mask, context_crop_512, context_mask_512
                 del inpainted_512, inpainted_context, inpainted_box, blend_mask, alpha, bg_roi
-                gc.collect()
 
             self.process_finished.emit(res_img)
         except Exception as e:

@@ -42,6 +42,9 @@ class RenderingMixin:
         # Save state of the page we are actually leaving
         self.save_current_page_state()
 
+        # Preserve the user's zoom level across navigation
+        self._preserved_zoom = self.view.transform().m11()
+
         # Update index to the desired page
         self.workspace.current_img_index = self._desired_page
 
@@ -73,6 +76,11 @@ class RenderingMixin:
         self.scene.addItem(self.current_image_item)
         self.scene.setSceneRect(QRectF(pixmap.rect()))
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        preserved = getattr(self, "_preserved_zoom", None)
+        self._preserved_zoom = None
+        if preserved:
+            ratio = preserved / self.view.transform().m11()
+            self.view.scale(ratio, ratio)
         self.view.setFocus()
 
         cached_data = self.workspace.get_page_state(path)
