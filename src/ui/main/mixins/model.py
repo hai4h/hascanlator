@@ -258,6 +258,11 @@ class ModelManagementMixin:
         elif name == "nmt_translator":
             self.nmt_model, self.nmt_is_loading = model, False
         elif name == "masking_model":
+            if self.masking_model is not None and self.masking_model is not model:
+                try:
+                    self.masking_model.close()
+                except Exception:
+                    pass
             self.masking_model, self.masking_is_loading = model, False
         elif name == "inpaint_model":
             if self.inpaint_model is not None and self.inpaint_model is not model:
@@ -343,6 +348,11 @@ class ModelManagementMixin:
         elif model_name == "nmt_translator":
             self.nmt_model = None
         elif model_name == "masking_model":
+            if self.masking_model is not None:
+                try:
+                    self.masking_model.close()
+                except Exception:
+                    pass
             self.masking_model = None
         elif model_name == "inpaint_model":
             if self.inpaint_model is not None:

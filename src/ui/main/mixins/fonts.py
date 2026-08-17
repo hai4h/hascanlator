@@ -82,6 +82,24 @@ class FontManagementMixin:
         if current_font: combo.setCurrentIndex(1)
         combo.blockSignals(False)
 
+    def update_font_combo_current(self, family):
+        """O(1) fast path for box-selection changes: updates only the CURRENT item.
+
+        Falls back to a full rebuild if the combo has no CURRENT section yet
+        (e.g. first selection after startup or after reload_custom_fonts).
+        """
+        combo = self.typeset_toolbar.font_combo
+        if combo.itemText(0) != "--- CURRENT ---" or combo.count() < 2:
+            self.refresh_font_combo(current_font=family)
+            return
+
+        combo.blockSignals(True)
+        combo.setItemText(1, family)
+        combo.setItemData(1, family, Qt.UserRole)
+        combo.setItemData(1, QFont(family), Qt.FontRole)
+        combo.setCurrentIndex(1)
+        combo.blockSignals(False)
+
     def _on_font_combo_changed(self, index):
         family = self.typeset_toolbar.font_combo.itemData(index, Qt.UserRole)
         if family: self.set_text_font_family(family)

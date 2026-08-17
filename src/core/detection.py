@@ -25,40 +25,81 @@ class DetectionWorker(QThread):
                     raw_boxes.append(QRectF(x1, y1, w, h))
 
             # Post-process: Merge overlapping or adjacent boxes (separated lines of the same bubble)
-            merged_boxes = []
+            # Spatial grid: clusters are bucketed into 128px cells; only clusters sharing a cell
+            # with a new box are tested (exact tests unchanged), turning O(n^2) into ~O(n).
+            CELL = 128
 
             # Manga text is vertical, meaning lines are separated horizontally (X-axis).
             # Lowered x_margin to avoid jumping across distinct bubbles.
             x_margin = 12
             y_margin = 0
 
+            def _cell_range(rect):
+                x0, y0 = int(rect.left()) // CELL, int(rect.top()) // CELL
+                x1, y1 = int(rect.right()) // CELL, int(rect.bottom()) // CELL
+                return x0, y0, x1, y1
+
+            merged_boxes = []   # QRectF or None (merged away); indices stable
+            grid = {}           # (cx, cy) -> set of cluster indices
+
+            def _unregister(idx, rect=None):
+                if rect is None:
+                    rect = merged_boxes[idx]
+                x0, y0, x1, y1 = _cell_range(rect)
+                for cy in range(y0, y1 + 1):
+                    for cx in range(x0, x1 + 1):
+                        grid.get((cx, cy), set()).discard(idx)
+
+            def _register(idx):
+                rect = merged_boxes[idx]
+                x0, y0, x1, y1 = _cell_range(rect)
+                for cy in range(y0, y1 + 1):
+                    for cx in range(x0, x1 + 1):
+                        grid.setdefault((cx, cy), set()).add(idx)
+
             for box in raw_boxes:
                 matched_clusters = []
                 expanded_box = box.adjusted(-x_margin, -y_margin, x_margin, y_margin)
 
-                for idx, cluster in enumerate(merged_boxes):
-                    if expanded_box.intersects(cluster):
-                        # Ultra-Strict Heuristic: Lines in the same bubble are highly aligned vertically.
-                        # Require at least 60% vertical overlap to fuse them. This prevents diagonal/staggered
-                        # bubbles from merging just because their corners touch.
-                        overlap_top = max(box.top(), cluster.top())
-                        overlap_bottom = min(box.bottom(), cluster.bottom())
-                        overlap_height = max(0, overlap_bottom - overlap_top)
+                # Candidates: clusters in any cell the expanded box covers (provably complete:
+                # an intersecting cluster shares a point p with the expanded range, and cell(p)
+                # is within the queried cell span). Exact tests still run on every candidate.
+                candidates = set()
+                x0, y0, x1, y1 = _cell_range(expanded_box)
+                for cy in range(y0, y1 + 1):
+                    for cx in range(x0, x1 + 1):
+                        candidates.update(grid.get((cx, cy), ()))
 
-                        min_height = min(box.height(), cluster.height())
+                for idx in candidates:
+                    cluster = merged_boxes[idx]
+                    # Ultra-Strict Heuristic: Lines in the same bubble are highly aligned vertically.
+                    # Require at least 60% vertical overlap to fuse them. This prevents diagonal/staggered
+                    # bubbles from merging just because their corners touch.
+                    overlap_top = max(box.top(), cluster.top())
+                    overlap_bottom = min(box.bottom(), cluster.bottom())
+                    overlap_height = max(0, overlap_bottom - overlap_top)
 
-                        if (overlap_height / max(1.0, min_height)) > 0.60:
-                            matched_clusters.append(idx)
+                    min_height = min(box.height(), cluster.height())
+
+                    if expanded_box.intersects(cluster) and (overlap_height / max(1.0, min_height)) > 0.60:
+                        matched_clusters.append(idx)
 
                 if not matched_clusters:
                     merged_boxes.append(box)
+                    _register(len(merged_boxes) - 1)
                 else:
-                    first_idx = matched_clusters[0]
-                    merged_boxes[first_idx] = merged_boxes[first_idx].united(box)
+                    first_idx = sorted(matched_clusters)[0]
+                    first_rect = merged_boxes[first_idx]
+                    merged_boxes[first_idx] = first_rect.united(box)
                     # If the new box bridges multiple existing clusters, merge them all into the first one
-                    for idx in reversed(matched_clusters[1:]):
+                    for idx in sorted(matched_clusters)[1:]:
                         merged_boxes[first_idx] = merged_boxes[first_idx].united(merged_boxes[idx])
-                        del merged_boxes[idx]
+                        _unregister(idx)
+                        merged_boxes[idx] = None
+                    _unregister(first_idx, first_rect)
+                    _register(first_idx)
+
+            merged_boxes = [b for b in merged_boxes if b is not None]
 
             self.process_finished.emit(merged_boxes)
         except Exception as e:

@@ -279,12 +279,13 @@ class HAScanlatorWindow(
         self._orphaned_workers.clear()
 
         # Free models explicitly
-        inp = getattr(self, "inpaint_model", None)
-        if inp is not None:
-            try:
-                inp.close()
-            except Exception:
-                pass
+        for key in ("inpaint_model", "masking_model"):
+            model = getattr(self, key, None)
+            if model is not None:
+                try:
+                    model.close()
+                except Exception:
+                    pass
         for key in ("mocr_model", "yolo_model", "nmt_model", "masking_model", "inpaint_model"):
             setattr(self, key, None)
         import gc; gc.collect()
@@ -373,7 +374,7 @@ class HAScanlatorWindow(
             dock.ocr_input.setEnabled(True); dock.trans_input.setEnabled(True)
             dock.ocr_input.setPlainText(self.current_selected_box.raw_text)
             dock.trans_input.setPlainText(self.current_selected_box.translated_text)
-            self.refresh_font_combo(self.current_selected_box.font_family)
+            self.update_font_combo_current(self.current_selected_box.font_family)
 
             self.typeset_toolbar.spin_size.blockSignals(True)
             self.typeset_toolbar.spin_size.setValue(self.current_selected_box.font_size)

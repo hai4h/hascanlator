@@ -105,19 +105,14 @@ class MaskingLoader(ModelLoader):
             # Trigger download via worker progress signal fallback
             raise RuntimeError("Masking model not found. Please download via Settings.")
 
+        from src.core.model_service import OnnxModelProxy
+
         class ComicTextDetectorONNX:
             def __init__(self, path):
-                import time; time.sleep(0.1)
-                import onnxruntime as ort
-
-                # Fetch available providers and prioritize GPU / Hardware Accelerators over CPU
-                available = ort.get_available_providers()
-                preferred = ['CUDAExecutionProvider', 'MIGraphXExecutionProvider', 'ROCMExecutionProvider', 'DmlExecutionProvider', 'CoreMLExecutionProvider', 'CPUExecutionProvider']
-                providers = [p for p in preferred if p in available]
-
-                self.session = ort.InferenceSession(path, providers=providers)
-                self.input_name = self.session.get_inputs()[0].name
-                self.providers = self.session.get_providers()
+                # Session creation happens in a child process so the UI never
+                # freezes (InferenceSession holds the GIL for its full duration).
+                self._proxy = OnnxModelProxy(path)
+                self.providers = self._proxy.providers
 
             def __call__(self, img_rgb):
                 import cv2, numpy as np
@@ -130,7 +125,7 @@ class MaskingLoader(ModelLoader):
                 tensor = padded.astype(np.float32) / 255.0
                 tensor = np.transpose(tensor, (2, 0, 1))
                 tensor = np.expand_dims(tensor, 0)
-                outputs = self.session.run(None, {self.input_name: tensor})
+                outputs = self._proxy.run({self._proxy.input_names[0]: tensor})
                 mask = None
                 for out in outputs:
                     if len(out.shape) == 4 and out.shape[1] == 1: mask = out; break
@@ -138,6 +133,9 @@ class MaskingLoader(ModelLoader):
                 mask = mask[0, 0]
                 mask = mask[:new_h, :new_w]
                 return cv2.resize(mask, (w, h), interpolation=cv2.INTER_LINEAR)
+
+            def close(self):
+                self._proxy.close()
 
         return ComicTextDetectorONNX(model_path)
 
